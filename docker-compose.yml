@@ -1,0 +1,113 @@
+x-db-env: &db-env
+  DB_HOST: ${DB_HOST}
+  DB_PORT: ${DB_PORT}
+  DB_NAME: ${DB_NAME}
+  DB_USER: ${DB_USER}
+  DB_PASSWORD: ${DB_PASSWORD}
+
+services:
+  bd:
+    build: ./BD
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  notifications:
+    build: ./services/notifications
+    environment:
+      <<: *db-env
+    depends_on:
+      bd:
+        condition: service_healthy
+    ports:
+      - "8003:8000"
+    networks:
+      - backend
+
+  ai-generation:
+    build: ./services/ai-generation
+    environment:
+      CATALOGS_DIR: /app/catalogs
+    volumes:
+      - ./catalogs:/app/catalogs:ro
+    ports:
+      - "8004:8000"
+    networks:
+      - backend
+
+  personal-data:
+    build: ./services/personal-data
+    environment:
+      <<: *db-env
+      NOTIFICATIONS_URL: http://notifications:8000
+    depends_on:
+      bd:
+        condition: service_healthy
+      notifications:
+        condition: service_started
+    ports:
+      - "8001:8000"
+    networks:
+      - backend
+
+  progress-loader:
+    build: ./services/progress-loader
+    environment:
+      <<: *db-env
+    depends_on:
+      bd:
+        condition: service_healthy
+    ports:
+      - "8002:8000"
+    networks:
+      - backend
+
+  course-progress:
+    build: ./services/course-progress
+    environment:
+      <<: *db-env
+      NOTIFICATIONS_URL: http://notifications:8000
+      AI_GENERATION_URL: http://ai-generation:8000
+      CATALOGS_DIR: /app/catalogs
+    volumes:
+      - ./catalogs:/app/catalogs:ro
+    depends_on:
+      bd:
+        condition: service_healthy
+      notifications:
+        condition: service_started
+      ai-generation:
+        condition: service_started
+    ports:
+      - "8005:8000"
+    networks:
+      - backend
+
+  course-management:
+    build: ./services/course-management
+    environment:
+      <<: *db-env
+      AI_GENERATION_URL: http://ai-generation:8000
+    depends_on:
+      bd:
+        condition: service_healthy
+      ai-generation:
+        condition: service_started
+    ports:
+      - "8006:8000"
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  pgdata:
