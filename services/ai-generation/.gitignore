@@ -1,0 +1,19 @@
+# Секреты — никогда не коммитим
+config.py
+
+# База данных (локальная заглушка)
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Файлы окружения
+.env

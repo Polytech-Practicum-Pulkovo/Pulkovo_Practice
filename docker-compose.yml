@@ -35,7 +35,11 @@ services:
   ai-generation:
     build: ./services/ai-generation
     environment:
+      <<: *db-env
       CATALOGS_DIR: /app/catalogs
+    depends_on:
+      bd:
+        condition: service_healthy
     volumes:
       - ./catalogs:/app/catalogs:ro
     ports:
