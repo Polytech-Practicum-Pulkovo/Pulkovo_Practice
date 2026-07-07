@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS training_type(
 CREATE TABLE IF NOT EXISTS program(
     id_program       int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     id_type          int          NOT NULL,
-    program_code     int          NOT NULL UNIQUE,
+    program_code     varchar(128)          NOT NULL UNIQUE,
     name             varchar(128) NOT NULL,
     time_to_complete int ,
     time_period      int ,
