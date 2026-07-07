@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS department(
     id_department int            GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code           varchar(11)  NOT NULL UNIQUE, 
     name           varchar(128),
     full_name      text          NOT NULL
 );
@@ -19,14 +20,16 @@ CREATE TABLE IF NOT EXISTS program(
     id_type          int          NOT NULL,
     program_code     int          NOT NULL UNIQUE,
     name             varchar(128) NOT NULL,
-    time_to_complete time         NOT NULL,
-    is_shown         boolean      NOT NULL,
+    time_to_complete int ,
+    time_period      int ,
+    is_empty         boolean      NOT NULL,
+    is_active         boolean      NOT NULL,
 
     CONSTRAINT program_type_fk
         FOREIGN KEY (id_type)
         REFERENCES training_type(id_type)
-        ON UPDATE SET NULL
-        ON DELETE SET NULL
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS topic(
@@ -58,6 +61,7 @@ CREATE TABLE IF NOT EXISTS question(
     id_topic      int  NOT NULL,
     question_text text NOT NULL,
     is_verified   bool NOT NULL,
+    is_active     bool NOT NULL,
 
     CONSTRAINT question_topic_fk
         FOREIGN KEY (id_topic)
@@ -109,6 +113,7 @@ CREATE TABLE IF NOT EXISTS notification(
      id          int       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
      id_employee int       NOT NULL,
      date        timestamp NOT NULL,
+     notification_text text NOT NULL,
      is_viewed   bool      NOT NULL,
 
      CONSTRAINT notification_emp_fk
