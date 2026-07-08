@@ -110,6 +110,28 @@ services:
     networks:
       - backend
 
+  frontend:
+    build:
+      context: ./services/frontend
+      args:
+        VITE_PERSONAL_DATA_URL: http://localhost:8001
+        VITE_PROGRESS_LOADER_URL: http://localhost:8002
+        VITE_NOTIFICATIONS_URL: http://localhost:8003
+        VITE_AI_GENERATION_URL: http://localhost:8004
+        VITE_COURSE_PROGRESS_URL: http://localhost:8005
+        VITE_COURSE_MANAGEMENT_URL: http://localhost:8006
+    depends_on:
+      - personal-data
+      - progress-loader
+      - notifications
+      - ai-generation
+      - course-progress
+      - course-management
+    ports:
+      - "3000:80"
+    networks:
+      - backend
+
 networks:
   backend:
 

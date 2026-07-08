@@ -2,12 +2,20 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.clients import generate_questions, generate_topic_distribution
 from app.db import get_cursor
 
 app = FastAPI(title="Управление курсами")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ManualTopicRequest(BaseModel):
@@ -35,9 +43,289 @@ class QuestionUpdateRequest(BaseModel):
     is_verified: Optional[bool] = None
 
 
+class ProgramCreateRequest(BaseModel):
+    name: str
+    program_code: str
+    time_to_complete: Optional[int] = None  # в минутах
+    id_type: int = 1
+
+
+class LiteratureRequest(BaseModel):
+    name: str
+    link: Optional[str] = None
+
+
+class BulkAssignmentRequest(BaseModel):
+    id_program: int
+    id_position: int
+
+
+class ComplaintResolveRequest(BaseModel):
+    is_solved: bool = True
+
+
+class AnswerUpdateRequest(BaseModel):
+    answer_text: str
+    is_correct: bool
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "course-management"}
+
+
+@app.get("/programs")
+def list_programs():
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT p.id_program, p.program_code, p.name, p.time_to_complete,
+                   p.is_shown, t.name AS training_type
+            FROM program p
+            JOIN training_type t ON t.id_type = p.id_type
+            ORDER BY p.id_program
+            """
+        )
+        programs = cur.fetchall()
+
+        for program in programs:
+            cur.execute(
+                "SELECT COUNT(*) AS count FROM topic WHERE id_program = %s",
+                (program["id_program"],),
+            )
+            program["topic_count"] = cur.fetchone()["count"]
+
+    return programs
+
+
+@app.get("/programs/{program_id}")
+def get_program(program_id: int):
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT p.id_program, p.program_code, p.name, p.time_to_complete,
+                   p.is_shown, t.name AS training_type
+            FROM program p
+            JOIN training_type t ON t.id_type = p.id_type
+            WHERE p.id_program = %s
+            """,
+            (program_id,),
+        )
+        program = cur.fetchone()
+        if not program:
+            raise HTTPException(status_code=404, detail="Программа не найдена")
+
+        cur.execute(
+            "SELECT id_topic, name FROM topic WHERE id_program = %s", (program_id,)
+        )
+        program["topics"] = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT l.id_literature, l.name, l.material_link
+            FROM program_literature pl
+            JOIN literature l ON l.id_literature = pl.id_literature
+            WHERE pl.id_program = %s
+            """,
+            (program_id,),
+        )
+        program["literature"] = cur.fetchall()
+
+    return program
+
+
+@app.post("/programs")
+def create_program(payload: ProgramCreateRequest):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO program (id_type, program_code, name, time_to_complete, is_shown)
+            VALUES (%s, %s, %s, %s, true) RETURNING id_program
+            """,
+            (payload.id_type, payload.program_code, payload.name, payload.time_to_complete),
+        )
+        result = cur.fetchone()
+
+    return {"id_program": result["id_program"]}
+
+
+@app.delete("/programs/{program_id}")
+def delete_program(program_id: int):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM program WHERE id_program = %s RETURNING id_program",
+            (program_id,),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Программа не найдена")
+
+    return {"status": "deleted"}
+
+
+@app.post("/programs/{program_id}/literature")
+def add_literature(program_id: int, payload: LiteratureRequest):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "INSERT INTO literature (name, material_link) VALUES (%s, %s) "
+            "RETURNING id_literature",
+            (payload.name, payload.link or ""),
+        )
+        literature_id = cur.fetchone()["id_literature"]
+        cur.execute(
+            "INSERT INTO program_literature (id_program, id_literature) VALUES (%s, %s)",
+            (program_id, literature_id),
+        )
+
+    return {"id_literature": literature_id}
+
+
+@app.delete("/literature/{literature_id}")
+def delete_literature(literature_id: int):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM literature WHERE id_literature = %s RETURNING id_literature",
+            (literature_id,),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Источник не найден")
+
+    return {"status": "deleted"}
+
+
+@app.get("/positions")
+def list_positions():
+    with get_cursor() as cur:
+        cur.execute("SELECT id_position, name FROM position ORDER BY id_position")
+        return cur.fetchall()
+
+
+@app.get("/departments")
+def list_departments():
+    with get_cursor() as cur:
+        cur.execute("SELECT id_department, name, full_name FROM department ORDER BY id_department")
+        return cur.fetchall()
+
+
+@app.get("/assignments")
+def list_assignments(id_program: int):
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT pos.id_position, pos.name AS position,
+                   dep.id_department, dep.name AS department, dep.full_name AS department_full
+            FROM program_completion pc
+            JOIN employee e ON e.id_employee = pc.id_employee
+            JOIN position pos ON pos.id_position = e.id_position
+            LEFT JOIN department dep ON dep.id_department = e.id_department
+            WHERE pc.id_program = %s
+            """,
+            (id_program,),
+        )
+        return cur.fetchall()
+
+
+@app.post("/assignments/bulk")
+def bulk_assign(payload: BulkAssignmentRequest):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT id_employee FROM employee WHERE id_position = %s",
+            (payload.id_position,),
+        )
+        employees = cur.fetchall()
+
+    created = 0
+    with get_cursor(commit=True) as cur:
+        for employee in employees:
+            cur.execute(
+                "SELECT 1 FROM program_completion WHERE id_employee = %s AND id_program = %s",
+                (employee["id_employee"], payload.id_program),
+            )
+            if cur.fetchone():
+                continue
+            cur.execute(
+                """
+                INSERT INTO program_completion (id_employee, id_program, start_date, end_date)
+                VALUES (%s, %s, %s, NULL)
+                """,
+                (employee["id_employee"], payload.id_program, datetime.utcnow()),
+            )
+            created += 1
+
+    return {"status": "assigned", "employees_assigned": created}
+
+
+@app.delete("/assignments/bulk")
+def bulk_unassign(id_program: int, id_position: int):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            DELETE FROM program_completion pc
+            USING employee e
+            WHERE pc.id_employee = e.id_employee
+              AND pc.id_program = %s
+              AND e.id_position = %s
+              AND pc.end_date IS NULL
+            RETURNING pc.id_program_completion
+            """,
+            (id_program, id_position),
+        )
+        deleted = cur.fetchall()
+
+    return {"status": "unassigned", "count": len(deleted)}
+
+
+@app.get("/complaints")
+def list_complaints(is_solved: Optional[bool] = None):
+    query = """
+        SELECT c.id_complaint, c.id_question, c.complaint_text, c.is_solved,
+               q.question_text
+        FROM complaint c
+        JOIN question q ON q.id_question = c.id_question
+    """
+    params: tuple = ()
+    if is_solved is not None:
+        query += " WHERE c.is_solved = %s"
+        params = (is_solved,)
+    query += " ORDER BY c.id_complaint DESC"
+
+    with get_cursor() as cur:
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
+@app.put("/complaints/{complaint_id}/resolve")
+def resolve_complaint(complaint_id: int, payload: ComplaintResolveRequest):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE complaint SET is_solved = %s WHERE id_complaint = %s "
+            "RETURNING id_complaint",
+            (payload.is_solved, complaint_id),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Жалоба не найдена")
+
+    return {"status": "updated"}
+
+
+@app.delete("/topics/{topic_id}")
+def delete_topic(topic_id: int):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM topic WHERE id_topic = %s RETURNING id_topic",
+            (topic_id,),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Тема не найдена")
+
+    return {"status": "deleted"}
 
 
 @app.post("/topics/manual")
@@ -184,6 +472,22 @@ def update_question(question_id: int, payload: QuestionUpdateRequest):
 
     if not result:
         raise HTTPException(status_code=404, detail="Вопрос не найден")
+
+    return {"status": "updated"}
+
+
+@app.put("/answers/{answer_id}")
+def update_answer(answer_id: int, payload: AnswerUpdateRequest):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE answer SET answer_text = %s, is_correct = %s WHERE id_answer = %s "
+            "RETURNING id_answer",
+            (payload.answer_text, payload.is_correct, answer_id),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Ответ не найден")
 
     return {"status": "updated"}
 

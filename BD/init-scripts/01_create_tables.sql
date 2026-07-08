@@ -22,8 +22,7 @@ CREATE TABLE IF NOT EXISTS program(
     name             varchar(128) NOT NULL,
     time_to_complete int ,
     time_period      int ,
-    is_empty         boolean      NOT NULL,
-    is_active         boolean      NOT NULL,
+    is_shown         boolean      NOT NULL,
 
     CONSTRAINT program_type_fk
         FOREIGN KEY (id_type)
@@ -61,7 +60,6 @@ CREATE TABLE IF NOT EXISTS question(
     id_topic      int  NOT NULL,
     question_text text NOT NULL,
     is_verified   bool NOT NULL,
-    is_active     bool NOT NULL,
 
     CONSTRAINT question_topic_fk
         FOREIGN KEY (id_topic)

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.catalogs import list_catalog_files, read_catalog_file
@@ -8,6 +9,13 @@ from app.services.answer_service import answer_user_question
 from app.services.topic_distribution_service import distribute_acts_to_topics
 
 app = FastAPI(title="ИИ Генерация")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class AnswerRequest(BaseModel):

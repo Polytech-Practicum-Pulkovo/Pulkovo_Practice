@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, EmailStr
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app.db import get_cursor
 from app.security import generate_reset_token, hash_password, verify_password
@@ -13,9 +14,16 @@ RESET_TOKEN_TTL_MINUTES = 60
 
 app = FastAPI(title="Личные данные")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    employee_number: int
     password: str
 
 
@@ -26,7 +34,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    employee_number: int
 
 
 class ResetPasswordRequest(BaseModel):
@@ -43,21 +51,24 @@ def health():
 def login(payload: LoginRequest):
     with get_cursor() as cur:
         cur.execute(
-            "SELECT id_employee, first_name, last_name, email, password_hash "
-            "FROM employee WHERE email = %s",
-            (payload.email,),
+            """
+            SELECT e.id_employee, e.first_name, e.last_name, e.middle_name,
+                   e.employee_number, e.email, e.password_hash,
+                   d.name AS department, p.name AS position
+            FROM employee e
+            LEFT JOIN department d ON d.id_department = e.id_department
+            LEFT JOIN position p ON p.id_position = e.id_position
+            WHERE e.employee_number = %s
+            """,
+            (payload.employee_number,),
         )
         employee = cur.fetchone()
 
     if not employee or not verify_password(payload.password, employee["password_hash"]):
-        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+        raise HTTPException(status_code=401, detail="Неверный табельный номер или пароль")
 
-    return {
-        "id_employee": employee["id_employee"],
-        "first_name": employee["first_name"],
-        "last_name": employee["last_name"],
-        "email": employee["email"],
-    }
+    employee.pop("password_hash")
+    return employee
 
 
 @app.post("/auth/change-password")
@@ -88,8 +99,8 @@ def change_password(payload: ChangePasswordRequest):
 async def forgot_password(payload: ForgotPasswordRequest):
     with get_cursor() as cur:
         cur.execute(
-            "SELECT id_employee, email FROM employee WHERE email = %s",
-            (payload.email,),
+            "SELECT id_employee, email FROM employee WHERE employee_number = %s",
+            (payload.employee_number,),
         )
         employee = cur.fetchone()
 

@@ -1,13 +1,14 @@
-INSERT INTO department (name, full_name) VALUES
-('АБ', 'Служба авиационной безопасности'),
-('ОТ', 'Отдел охраны труда и техники безопасности'),
-('ПЕР', 'Служба организации перевозок');
+INSERT INTO department (code, name, full_name) VALUES
+('АБ', 'АБ', 'Служба авиационной безопасности'),
+('ОТ', 'ОТ', 'Отдел охраны труда и техники безопасности'),
+('ПЕР', 'ПЕР', 'Служба организации перевозок');
 
 INSERT INTO position (name) VALUES
 ('Стажер'),
 ('Специалист по охране труда'),
 ('Ведущий специалист по охране труда'),
-('Руководитель службы');
+('Руководитель службы'),
+('Администратор');
 
 INSERT INTO training_type (name) VALUES
 ('Онлайн-курс'),
@@ -15,9 +16,9 @@ INSERT INTO training_type (name) VALUES
 ('Вебинар');
 
 INSERT INTO program (id_type, program_code, name, time_to_complete, is_shown) VALUES
-(1, 101, 'Основы охраны труда и техники безопасности', '10:00:00', true),
-(1, 102, 'Безопасность на перроне и подъездных путях', '15:30:00', true),
-(2, 103, 'Пожарная безопасность и действия при ЧС', '08:00:00', true);
+(1, 101, 'Основы охраны труда и техники безопасности', 600, true),
+(1, 102, 'Безопасность на перроне и подъездных путях', 930, true),
+(2, 103, 'Пожарная безопасность и действия при ЧС', 480, true);
 
 INSERT INTO topic (id_program, name) VALUES
 (1, 'Инструктаж по охране труда'),
@@ -53,16 +54,17 @@ INSERT INTO answer (id_question, answer_text, is_correct) VALUES
 (5, 'Продолжить работу до объявления по громкой связи', false);
 
 INSERT INTO employee (id_department, id_position, employee_number, first_name, last_name, middle_name, email, password_hash) VALUES
-(1, 2, 1001, 'Иван', 'Иванов', 'Иванович', 'ivanov@example.com', 'pbkdf2_sha256$260000$6707204bb5b22aef235e2f8ba61246ef$db95a36d6bedcea933d7851c10d9895bbb44746794b69be62413ab74e6a70253'),
-(1, 3, 1002, 'Петр', 'Петров', 'Петрович', 'petrov@example.com', 'pbkdf2_sha256$260000$6707204bb5b22aef235e2f8ba61246ef$db95a36d6bedcea933d7851c10d9895bbb44746794b69be62413ab74e6a70253'),
-(2, 1, 1003, 'Мария', 'Сидорова', 'Александровна', 'sidorova@example.com', 'pbkdf2_sha256$260000$6707204bb5b22aef235e2f8ba61246ef$db95a36d6bedcea933d7851c10d9895bbb44746794b69be62413ab74e6a70253'),
-(3, 4, 1004, 'Олег', 'Смирнов', 'Владимирович', 'smirnov@example.com', 'pbkdf2_sha256$260000$6707204bb5b22aef235e2f8ba61246ef$db95a36d6bedcea933d7851c10d9895bbb44746794b69be62413ab74e6a70253');
+(1, 2, 1001, 'Иван', 'Иванов', 'Иванович', 'ivanov@example.com', 'pbkdf2_sha256$260000$81bd6b9892a2ba395f5c3d352a048af3$0e441752c49591e55d6684a23ef6ef5ada0f5e0190de59056260652209a9a737'),
+(1, 3, 1002, 'Петр', 'Петров', 'Петрович', 'petrov@example.com', 'pbkdf2_sha256$260000$81bd6b9892a2ba395f5c3d352a048af3$0e441752c49591e55d6684a23ef6ef5ada0f5e0190de59056260652209a9a737'),
+(2, 1, 1003, 'Мария', 'Сидорова', 'Александровна', 'sidorova@example.com', 'pbkdf2_sha256$260000$81bd6b9892a2ba395f5c3d352a048af3$0e441752c49591e55d6684a23ef6ef5ada0f5e0190de59056260652209a9a737'),
+(3, 4, 1004, 'Олег', 'Смирнов', 'Владимирович', 'smirnov@example.com', 'pbkdf2_sha256$260000$81bd6b9892a2ba395f5c3d352a048af3$0e441752c49591e55d6684a23ef6ef5ada0f5e0190de59056260652209a9a737'),
+(2, 5, 1005, 'Анна', 'Кузнецова', 'Сергеевна', 'kuznetsova@example.com', 'pbkdf2_sha256$260000$81bd6b9892a2ba395f5c3d352a048af3$0e441752c49591e55d6684a23ef6ef5ada0f5e0190de59056260652209a9a737');
 
-INSERT INTO notification (id_employee, date, is_viewed) VALUES
-(1, '2026-06-01 10:00:00', true),
-(2, '2026-06-02 11:00:00', false),
-(3, '2026-06-03 12:00:00', true),
-(1, '2026-06-05 09:30:00', false);
+INSERT INTO notification (id_employee, date, notification_text, is_viewed) VALUES
+(1, '2026-06-01 10:00:00', 'Вам назначен новый курс: "Основы охраны труда и техники безопасности"', true),
+(2, '2026-06-02 11:00:00', 'Вам назначен новый курс: "Безопасность на перроне и подъездных путях"', false),
+(3, '2026-06-03 12:00:00', 'Вам назначен новый курс: "Основы охраны труда и техники безопасности"', true),
+(1, '2026-06-05 09:30:00', 'Напоминание: истекает срок прохождения курса', false);
 
 INSERT INTO complaint (id_question, complaint_text, is_solved) VALUES
 (1, 'Вопрос сформулирован некорректно, не указан характер работ.', false),

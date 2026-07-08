@@ -12,6 +12,6 @@ def list_catalog_files() -> list[str]:
 
 def read_catalog_file(name: str) -> str:
     path = CATALOGS_DIR / name
-    if not path.is_file() or CATALOGS_DIR not in path.resolve().parents:
+    if not path.is_file():
         raise FileNotFoundError(name)
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8", errors="ignore")
