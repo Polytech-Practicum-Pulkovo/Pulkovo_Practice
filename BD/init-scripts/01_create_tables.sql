@@ -1,7 +1,12 @@
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO public;
+
 CREATE TABLE IF NOT EXISTS department(
     id_department int            GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code           varchar(11)  NOT NULL UNIQUE, 
-    name           varchar(128),
+    name           text,
     full_name      text          NOT NULL
 );
 
@@ -19,7 +24,7 @@ CREATE TABLE IF NOT EXISTS program(
     id_program       int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     id_type          int          NOT NULL,
     program_code     varchar(128)          NOT NULL UNIQUE,
-    name             varchar(128) NOT NULL,
+    name             text NOT NULL,
     time_to_complete int ,
     time_period      int ,
     is_empty         boolean      NOT NULL,
