@@ -6,7 +6,6 @@ import {
   listPrograms,
   listQuestions,
   resolveComplaint,
-  updateAnswer,
   updateQuestion,
 } from "../../api/courseManagement";
 import Modal from "../../components/Modal";
@@ -60,10 +59,10 @@ function BankTab() {
   }
 
   async function saveEdit(questionId) {
-    await updateQuestion(questionId, { question_text: editDraft.question_text });
-    await Promise.all(
-      editDraft.answers.map((a) => updateAnswer(a.id_answer, a.answer_text, a.is_correct))
-    );
+    await updateQuestion(questionId, {
+      question_text: editDraft.question_text,
+      answers: editDraft.answers,
+    });
     setEditingId(null);
     reloadQuestions();
   }
@@ -122,11 +121,14 @@ function BankTab() {
               {editDraft.answers.map((a, idx) => (
                 <div key={a.id_answer} className="row mb-16">
                   <input
-                    type="checkbox"
+                    type="radio"
+                    name={`correct-answer-${q.id_question}`}
                     checked={a.is_correct}
-                    onChange={(e) => {
-                      const answers = [...editDraft.answers];
-                      answers[idx] = { ...a, is_correct: e.target.checked };
+                    onChange={() => {
+                      const answers = editDraft.answers.map((answer, answerIdx) => ({
+                        ...answer,
+                        is_correct: answerIdx === idx,
+                      }));
                       setEditDraft({ ...editDraft, answers });
                     }}
                   />

@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.clients import generate_questions, parse_program_file
+from app.clients import generate_questions, notify_lms, parse_program_file
 from app.db import get_cursor
 
 LEARNING_MATERIALS_DIR = os.getenv("LEARNING_MATERIALS_DIR", "/app/learning_materials")
@@ -41,6 +41,7 @@ class QuestionGenerationRequest(BaseModel):
 class QuestionUpdateRequest(BaseModel):
     question_text: Optional[str] = None
     is_verified: Optional[bool] = None
+    answers: Optional[list[dict]] = None
 
 
 class ProgramCreateRequest(BaseModel):
@@ -261,7 +262,7 @@ def list_assignments(id_program: int):
 
 
 @app.post("/assignments/bulk")
-def bulk_assign(payload: BulkAssignmentRequest):
+async def bulk_assign(payload: BulkAssignmentRequest):
     with get_cursor() as cur:
         cur.execute(
             "SELECT id_employee FROM employee WHERE id_position = %s",
@@ -269,7 +270,14 @@ def bulk_assign(payload: BulkAssignmentRequest):
         )
         employees = cur.fetchall()
 
+        cur.execute(
+            "SELECT name FROM program WHERE id_program = %s",
+            (payload.id_program,),
+        )
+        program = cur.fetchone()
+
     created = 0
+    notified_employee_ids: list[int] = []
     with get_cursor(commit=True) as cur:
         for employee in employees:
             cur.execute(
@@ -286,6 +294,11 @@ def bulk_assign(payload: BulkAssignmentRequest):
                 (employee["id_employee"], payload.id_program, datetime.utcnow()),
             )
             created += 1
+            notified_employee_ids.append(employee["id_employee"])
+
+    if program:
+        for employee_id in notified_employee_ids:
+            await notify_lms(employee_id, f'Вам назначен курс «{program["name"]}»')
 
     return {"status": "assigned", "employees_assigned": created}
 
@@ -433,7 +446,14 @@ async def parse_program(file: UploadFile = File(...)):
 
 
 @app.post("/assignments")
-def assign_course(payload: AssignmentRequest):
+async def assign_course(payload: AssignmentRequest):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT name FROM program WHERE id_program = %s",
+            (payload.id_program,),
+        )
+        program = cur.fetchone()
+
     with get_cursor(commit=True) as cur:
         cur.execute(
             """
@@ -443,6 +463,9 @@ def assign_course(payload: AssignmentRequest):
             (payload.id_employee, payload.id_program, datetime.utcnow()),
         )
         result = cur.fetchone()
+
+    if program:
+        await notify_lms(payload.id_employee, f'Вам назначен курс «{program["name"]}»')
 
     return {"id_program_completion": result["id_program_completion"]}
 
@@ -575,16 +598,45 @@ def update_question(question_id: int, payload: QuestionUpdateRequest):
         params.append(payload.is_verified)
 
     if not fields:
-        raise HTTPException(status_code=400, detail="Нечего обновлять")
+        if payload.answers is None:
+            raise HTTPException(status_code=400, detail="Нечего обновлять")
+
+    if payload.answers is not None:
+        if not payload.answers:
+            raise HTTPException(status_code=400, detail="У вопроса должен быть хотя бы один ответ")
+
+        correct_count = sum(1 for answer in payload.answers if answer.get("is_correct"))
+        if correct_count != 1:
+            raise HTTPException(status_code=400, detail="У вопроса должен быть ровно один правильный ответ")
 
     params.append(question_id)
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            f"UPDATE question SET {', '.join(fields)} WHERE id_question = %s "
-            "RETURNING id_question",
-            params,
-        )
-        result = cur.fetchone()
+        if fields:
+            cur.execute(
+                f"UPDATE question SET {', '.join(fields)} WHERE id_question = %s RETURNING id_question",
+                params,
+            )
+            result = cur.fetchone()
+        else:
+            cur.execute("SELECT id_question FROM question WHERE id_question = %s", (question_id,))
+            result = cur.fetchone()
+
+        if payload.answers is not None:
+            cur.execute(
+                "SELECT id_answer FROM answer WHERE id_question = %s ORDER BY id_answer",
+                (question_id,),
+            )
+            existing_answers = cur.fetchall()
+            existing_ids = [row["id_answer"] for row in existing_answers]
+            payload_ids = [answer["id_answer"] for answer in payload.answers]
+            if existing_ids != payload_ids:
+                raise HTTPException(status_code=400, detail="Набор ответов вопроса не совпадает с текущим")
+
+            for answer in payload.answers:
+                cur.execute(
+                    "UPDATE answer SET answer_text = %s, is_correct = %s WHERE id_answer = %s",
+                    (answer["answer_text"], answer["is_correct"], answer["id_answer"]),
+                )
 
     if not result:
         raise HTTPException(status_code=404, detail="Вопрос не найден")

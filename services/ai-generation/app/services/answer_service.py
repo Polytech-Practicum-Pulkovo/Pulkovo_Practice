@@ -9,6 +9,14 @@ from app.pdf_utils import extract_text_from_pdf
 
 SOURCE_CONTEXT_LIMIT = 12000
 
+FREE_CHAT_SYSTEM_PROMPT = (
+    "Ты эксперт по охране труда и безопасности в аэропорту. "
+    "Отвечай только на вопросы, связанные с самолётами, авиационной безопасностью, "
+    "инструкциями, рисками, нормативами и работой в аэропортовой среде. "
+    "Если вопрос не относится к этой теме, кратко откажи: "
+    "'Вопрос не относится к области авиационной безопасности и охраны труда'."
+)
+
 SYSTEM_PROMPT_TEMPLATE = (
     "Ты эксперт по охране труда в аэропорту, который помогает пользователю "
     "разобраться в вопросе теста, который он сейчас проходит.\n\n"
@@ -71,15 +79,14 @@ async def generate_chat_answer(client, request_text: str, chat_history: list = N
         chat_history: История в формате [{"role": ..., "content": ...}]
         material_path: Путь к PDF, по которому нужно отвечать в контексте документа.
     """
-    messages = []
+    messages = [{"role": "system", "content": FREE_CHAT_SYSTEM_PROMPT}]
     if chat_history:
         messages.extend(chat_history)
 
     if material_path:
         document_text = extract_text_from_pdf(material_path)
         if document_text:
-            messages.insert(
-                0,
+            messages.append(
                 {
                     "role": "system",
                     "content": (
@@ -87,7 +94,7 @@ async def generate_chat_answer(client, request_text: str, chat_history: list = N
                         "Если ответ есть в документе, используй его как основной источник.\n\n"
                         f"ТЕКСТ PDF:\n{document_text[:SOURCE_CONTEXT_LIMIT]}"
                     ),
-                },
+                }
             )
 
     messages.append({"role": "user", "content": request_text})

@@ -3,6 +3,7 @@ import os
 import httpx
 
 AI_GENERATION_URL = os.getenv("AI_GENERATION_URL", "http://ai-generation:8000")
+NOTIFICATIONS_URL = os.getenv("NOTIFICATIONS_URL", "http://notifications:8000")
 
 
 async def parse_program_file(filename: str, content: bytes) -> dict:
@@ -37,3 +38,14 @@ async def generate_questions(material_path: str, previous_questions: list[dict],
         )
         response.raise_for_status()
         return response.json()["questions"]
+
+
+async def notify_lms(employee_id: int, message: str) -> None:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        try:
+            await client.post(
+                f"{NOTIFICATIONS_URL}/notifications/lms",
+                json={"employee_id": employee_id, "message": message},
+            )
+        except httpx.HTTPError:
+            pass

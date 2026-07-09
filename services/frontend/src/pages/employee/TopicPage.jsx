@@ -197,6 +197,7 @@ export default function TopicPage() {
                 isFinalTest: false,
               });
               setSession(s);
+              await reload();
             }}
             onSubmit={async (answers) => {
               const outcome = await submitTopicTest(completionId, topicId, employee.id_employee, answers);

@@ -60,12 +60,10 @@ export default function CourseDetailPage() {
     );
   }
 
-  // Процент прохождения = доля успешно пройденных тестов (темы + итоговый),
-  // изучение материалов на него не влияет.
-  const totalTests = course.topics.length + 1;
+  // Процент прохождения = доля успешно пройденных тем.
   const passedTopics = course.topics.filter((t) => t.status === "passed").length;
-  const passedFinal = finalTest?.last_attempt?.passed ? 1 : 0;
-  const overallPercent = Math.round((100 * (passedTopics + passedFinal)) / totalTests);
+  const totalTopics = course.topics.length;
+  const overallPercent = totalTopics ? Math.round((100 * passedTopics) / totalTopics) : 0;
 
   return (
     <div>

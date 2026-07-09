@@ -14,10 +14,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+TEST_QUESTION_COUNT = 15
+
+
+def _topic_test_passed(cur, completion_id: int, id_topic: int) -> bool:
+    """Проверяет последнюю попытку по теме только по текущим 15 вопросам теста."""
+
+    cur.execute(
+        """
+        SELECT id_question
+        FROM question
+        WHERE id_topic = %s
+        ORDER BY id_question DESC
+        LIMIT %s
+        """,
+        (id_topic, TEST_QUESTION_COUNT),
+    )
+    question_ids = [row["id_question"] for row in cur.fetchall()]
+    if not question_ids:
+        return False
+
+    cur.execute(
+        """
+        SELECT a.id_question, a.is_correct
+        FROM test_completion tc
+        JOIN answer a ON a.id_answer = tc.id_answer
+        JOIN question q ON q.id_question = a.id_question
+        WHERE tc.id_program_completion = %s AND q.id_topic = %s AND q.id_question = ANY(%s)
+          AND tc.is_final_test = false
+          AND tc.submitted_at = (
+              SELECT MAX(tc2.submitted_at)
+              FROM test_completion tc2
+              JOIN answer a2 ON a2.id_answer = tc2.id_answer
+              JOIN question q2 ON q2.id_question = a2.id_question
+              WHERE tc2.id_program_completion = %s AND q2.id_topic = %s AND q2.id_question = ANY(%s)
+                AND tc2.is_final_test = false
+          )
+        """,
+        (completion_id, id_topic, question_ids, completion_id, id_topic, question_ids),
+    )
+    answers = cur.fetchall()
+    if not answers:
+        return False
+
+    correct = sum(1 for row in answers if row["is_correct"])
+    return round(100 * correct / TEST_QUESTION_COUNT) >= 80
+
 
 def _test_passed(cur, completion_id: int, id_topic: int | None, id_program: int, is_final: bool) -> bool:
-    """Пройден ли данный тест (промежуточный по теме или итоговый) — по корректности
-    последней попытки. Изучение материалов на результат не влияет."""
+    """Пройден ли данный тест (промежуточный по теме или итоговый)."""
     if is_final:
         cur.execute(
             """
@@ -35,6 +80,8 @@ def _test_passed(cur, completion_id: int, id_topic: int | None, id_program: int,
             """,
             (completion_id, id_program),
         )
+        attempt = cur.fetchone()
+        return bool(attempt["total"]) and round(100 * attempt["correct"] / attempt["total"]) >= 80
     else:
         cur.execute(
             """
@@ -51,27 +98,21 @@ def _test_passed(cur, completion_id: int, id_topic: int | None, id_program: int,
             """,
             (completion_id, id_topic),
         )
-    attempt = cur.fetchone()
-    return bool(attempt["total"]) and round(100 * attempt["correct"] / attempt["total"]) >= 80
+        attempt = cur.fetchone()
+        return _topic_test_passed(cur, completion_id, id_topic) if bool(attempt["total"]) else False
 
 
 def _progress_percent(cur, completion_id: int, id_program: int) -> int:
     """
-    Процент прохождения курса = доля успешно завершённых тестов (промежуточных
-    по темам + итоговый) от их общего числа. Изучение материалов на процент
-    не влияет.
+    Процент прохождения курса = доля успешно пройденных тем.
     """
     cur.execute("SELECT id_topic FROM topic WHERE id_program = %s", (id_program,))
     topics = cur.fetchall()
 
-    total_tests = len(topics) + 1  # + итоговый тест
-    passed_tests = sum(
-        1 for topic in topics if _test_passed(cur, completion_id, topic["id_topic"], id_program, False)
-    )
-    if _test_passed(cur, completion_id, None, id_program, True):
-        passed_tests += 1
+    total_tests = len(topics)
+    passed_tests = sum(1 for topic in topics if _test_passed(cur, completion_id, topic["id_topic"], id_program, False))
 
-    return round(100 * passed_tests / total_tests)
+    return round(100 * passed_tests / total_tests) if total_tests else 0
 
 
 @app.get("/health")

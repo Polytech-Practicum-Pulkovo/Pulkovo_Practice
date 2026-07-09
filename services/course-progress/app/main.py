@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ SECTIONS = ("materials", "test", "results")
 
 # Лимит времени на прохождение любого теста (промежуточного и итогового).
 TEST_DURATION_SECONDS = 45 * 60
+TEST_QUESTION_COUNT = 15
 
 
 class NavigateRequest(BaseModel):
@@ -106,7 +107,7 @@ def get_test_session(employee_id: int):
 
 
 @app.post("/employees/{employee_id}/test-session/start")
-def start_test_session(employee_id: int, payload: StartTestSessionRequest):
+async def start_test_session(employee_id: int, payload: StartTestSessionRequest):
     with get_cursor() as cur:
         cur.execute("SELECT * FROM test_session WHERE id_employee = %s", (employee_id,))
         existing = cur.fetchone()
@@ -139,6 +140,33 @@ def start_test_session(employee_id: int, payload: StartTestSessionRequest):
             cur.execute("SELECT 1 FROM topic WHERE id_topic = %s", (payload.id_topic,))
             if not cur.fetchone():
                 raise HTTPException(status_code=404, detail="Тема не найдена")
+
+            cur.execute(
+                "SELECT COUNT(*) AS count FROM question WHERE id_topic = %s",
+                (payload.id_topic,),
+            )
+            question_count = cur.fetchone()["count"]
+
+            cur.execute(
+                """
+                SELECT 1
+                FROM test_completion tc
+                JOIN answer a ON a.id_answer = tc.id_answer
+                JOIN question q ON q.id_question = a.id_question
+                WHERE tc.id_program_completion = %s AND q.id_topic = %s AND tc.is_final_test = false
+                LIMIT 1
+                """,
+                (payload.id_program_completion, payload.id_topic),
+            )
+            has_previous_attempt = cur.fetchone() is not None
+
+        if has_previous_attempt:
+            await _replenish_topic_questions(payload.id_topic, generate_count=TEST_QUESTION_COUNT)
+        elif question_count < TEST_QUESTION_COUNT:
+            await _replenish_topic_questions(
+                payload.id_topic,
+                generate_count=TEST_QUESTION_COUNT - question_count,
+            )
 
     duration = TEST_DURATION_SECONDS
     started_at = datetime.utcnow()
@@ -209,9 +237,6 @@ def get_course(completion_id: int):
             )
             topic["materials"] = cur.fetchall()
 
-            cur.execute("SELECT COUNT(*) AS count FROM question WHERE id_topic = %s", (topic["id_topic"],))
-            total_questions = cur.fetchone()["count"]
-
             cur.execute(
                 """
                 SELECT COUNT(*) AS answered, COUNT(*) FILTER (WHERE a.is_correct) AS correct
@@ -230,9 +255,9 @@ def get_course(completion_id: int):
                 (completion_id, topic["id_topic"], completion_id, topic["id_topic"]),
             )
             attempt = cur.fetchone()
-            if attempt["answered"] and total_questions:
+            if attempt["answered"]:
                 # Неотвеченные (в т.ч. из-за истечения времени) вопросы считаются неверными.
-                percent = round(100 * attempt["correct"] / total_questions)
+                percent = round(100 * attempt["correct"] / TEST_QUESTION_COUNT)
                 topic["progress_percent"] = percent
                 topic["status"] = "passed" if percent >= 80 else "in_progress"
             else:
@@ -304,8 +329,102 @@ def _previous_questions_for_topic(cur, topic_id: int) -> list[dict]:
     return previous
 
 
+def _load_topic_questions(cur, topic_id: int, limit: int = TEST_QUESTION_COUNT) -> list[dict]:
+    """Возвращает последние вопросы темы, которые используются в тесте."""
+
+    cur.execute(
+        """
+        SELECT id_question, question_text, is_verified
+        FROM question
+        WHERE id_topic = %s
+        ORDER BY id_question DESC
+        LIMIT %s
+        """,
+        (topic_id, limit),
+    )
+    questions = list(reversed(cur.fetchall()))
+
+    for question in questions:
+        cur.execute(
+            "SELECT id_answer, answer_text FROM answer WHERE id_question = %s",
+            (question["id_question"],),
+        )
+        question["answers"] = cur.fetchall()
+
+    return questions
+
+
+def _load_topic_last_attempt(
+    cur, completion_id: int, topic_id: int, question_ids: list[int]
+) -> dict | None:
+    """Возвращает результаты последней попытки только по текущему набору вопросов."""
+
+    if not question_ids:
+        return None
+
+    cur.execute(
+        """
+        SELECT a.id_question, tc.id_answer, a.is_correct
+        FROM test_completion tc
+        JOIN answer a ON a.id_answer = tc.id_answer
+        JOIN question q ON q.id_question = a.id_question
+        WHERE tc.id_program_completion = %s AND q.id_topic = %s AND q.id_question = ANY(%s) AND tc.is_final_test = false
+          AND tc.submitted_at = (
+              SELECT MAX(tc2.submitted_at)
+              FROM test_completion tc2
+              JOIN answer a2 ON a2.id_answer = tc2.id_answer
+              JOIN question q2 ON q2.id_question = a2.id_question
+              WHERE tc2.id_program_completion = %s AND q2.id_topic = %s AND q2.id_question = ANY(%s) AND tc2.is_final_test = false
+          )
+        """,
+        (completion_id, topic_id, question_ids, completion_id, topic_id, question_ids),
+    )
+    last_answers = cur.fetchall()
+    if not last_answers:
+        return None
+
+    correct = sum(1 for a in last_answers if a["is_correct"])
+    percent = round(100 * correct / len(question_ids))
+    return {
+        "percent": percent,
+        "passed": percent >= 80,
+        "answers": last_answers,
+    }
+
+
+def _load_final_test_questions(cur, id_program: int, per_topic: int = 5) -> list[dict]:
+    """Возвращает финальный тест: по последним 5 вопросам для каждой темы программы."""
+
+    cur.execute(
+        """
+        WITH ranked_questions AS (
+            SELECT q.id_question, q.question_text, q.id_topic,
+                   ROW_NUMBER() OVER (PARTITION BY q.id_topic ORDER BY q.id_question DESC) AS rn
+            FROM question q
+            JOIN topic t ON t.id_topic = q.id_topic
+            WHERE t.id_program = %s
+        )
+        SELECT id_question, question_text, id_topic
+        FROM ranked_questions
+        WHERE rn <= %s
+        ORDER BY id_topic, id_question
+        """,
+        (id_program, per_topic),
+    )
+    questions = cur.fetchall()
+
+    for question in questions:
+        cur.execute(
+            "SELECT id_answer, answer_text FROM answer WHERE id_question = %s",
+            (question["id_question"],),
+        )
+        question["answers"] = cur.fetchall()
+
+    return questions
+
+
 @app.get("/courses/{completion_id}/topics/{topic_id}")
-async def get_topic(completion_id: int, topic_id: int, employee_id: int, background_tasks: BackgroundTasks):
+async def get_topic(completion_id: int, topic_id: int, employee_id: int):
     with get_cursor() as cur:
         cur.execute("SELECT id_topic, name FROM topic WHERE id_topic = %s", (topic_id,))
         topic = cur.fetchone()
@@ -326,73 +445,12 @@ async def get_topic(completion_id: int, topic_id: int, employee_id: int, backgro
         )
         topic["materials"] = cur.fetchall()
 
-        cur.execute(
-            "SELECT id_question, question_text, is_verified FROM question WHERE id_topic = %s",
-            (topic_id,),
-        )
-        questions = cur.fetchall()
+        questions = _load_topic_questions(cur, topic_id)
 
-        cur.execute(
-            """
-            SELECT DISTINCT a.id_question
-            FROM test_completion tc
-            JOIN answer a ON a.id_answer = tc.id_answer
-            JOIN question q ON q.id_question = a.id_question
-            WHERE tc.id_program_completion = %s AND q.id_topic = %s AND tc.is_final_test = false
-            """,
-            (completion_id, topic_id),
-        )
-        answered_ids = {row["id_question"] for row in cur.fetchall()}
-        unanswered_count = sum(1 for q in questions if q["id_question"] not in answered_ids)
-
-    if unanswered_count < 5:
-        # Генерация вопросов через ИИ может занимать десятки секунд — не блокируем
-        # ответ страницы, довопросы подтянутся при следующем открытии темы.
-        background_tasks.add_task(_replenish_topic_questions, topic_id)
-
-    with get_cursor() as cur:
-        cur.execute(
-            "SELECT id_question, question_text, is_verified FROM question WHERE id_topic = %s",
-            (topic_id,),
-        )
-        questions = cur.fetchall()
-        for question in questions:
-            cur.execute(
-                "SELECT id_answer, answer_text FROM answer WHERE id_question = %s",
-                (question["id_question"],),
-            )
-            question["answers"] = cur.fetchall()
         topic["questions"] = questions
 
-        cur.execute(
-            """
-            SELECT a.id_question, tc.id_answer, a.is_correct
-            FROM test_completion tc
-            JOIN answer a ON a.id_answer = tc.id_answer
-            JOIN question q ON q.id_question = a.id_question
-            WHERE tc.id_program_completion = %s AND q.id_topic = %s AND tc.is_final_test = false
-              AND tc.submitted_at = (
-                  SELECT MAX(tc2.submitted_at)
-                  FROM test_completion tc2
-                  JOIN answer a2 ON a2.id_answer = tc2.id_answer
-                  JOIN question q2 ON q2.id_question = a2.id_question
-                  WHERE tc2.id_program_completion = %s AND q2.id_topic = %s AND tc2.is_final_test = false
-              )
-            """,
-            (completion_id, topic_id, completion_id, topic_id),
-        )
-        last_answers = cur.fetchall()
-        if last_answers and questions:
-            # Неотвеченные (в т.ч. из-за истечения времени) вопросы считаются неверными.
-            correct = sum(1 for a in last_answers if a["is_correct"])
-            percent = round(100 * correct / len(questions))
-            topic["last_attempt"] = {
-                "percent": percent,
-                "passed": percent >= 80,
-                "answers": last_answers,
-            }
-        else:
-            topic["last_attempt"] = None
+        question_ids = [q["id_question"] for q in questions]
+        topic["last_attempt"] = _load_topic_last_attempt(cur, completion_id, topic_id, question_ids)
 
         cur.execute(
             """
@@ -419,22 +477,8 @@ def get_final_test(completion_id: int):
         if not completion:
             raise HTTPException(status_code=404, detail="Курс не найден")
 
-        cur.execute(
-            """
-            SELECT q.id_question, q.question_text
-            FROM question q
-            JOIN topic t ON t.id_topic = q.id_topic
-            WHERE t.id_program = %s
-            """,
-            (completion["id_program"],),
-        )
-        questions = cur.fetchall()
-        for question in questions:
-            cur.execute(
-                "SELECT id_answer, answer_text FROM answer WHERE id_question = %s",
-                (question["id_question"],),
-            )
-            question["answers"] = cur.fetchall()
+        questions = _load_final_test_questions(cur, completion["id_program"])
+        question_ids = [q["id_question"] for q in questions]
 
         cur.execute(
             """
@@ -443,17 +487,17 @@ def get_final_test(completion_id: int):
             JOIN answer a ON a.id_answer = tc.id_answer
             JOIN question q ON q.id_question = a.id_question
             JOIN topic t ON t.id_topic = q.id_topic
-            WHERE tc.id_program_completion = %s AND t.id_program = %s AND tc.is_final_test = true
+            WHERE tc.id_program_completion = %s AND t.id_program = %s AND q.id_question = ANY(%s) AND tc.is_final_test = true
               AND tc.submitted_at = (
                   SELECT MAX(tc2.submitted_at)
                   FROM test_completion tc2
                   JOIN answer a2 ON a2.id_answer = tc2.id_answer
                   JOIN question q2 ON q2.id_question = a2.id_question
                   JOIN topic t2 ON t2.id_topic = q2.id_topic
-                  WHERE tc2.id_program_completion = %s AND t2.id_program = %s AND tc2.is_final_test = true
+                  WHERE tc2.id_program_completion = %s AND t2.id_program = %s AND q2.id_question = ANY(%s) AND tc2.is_final_test = true
               )
             """,
-            (completion_id, completion["id_program"], completion_id, completion["id_program"]),
+            (completion_id, completion["id_program"], question_ids, completion_id, completion["id_program"], question_ids),
         )
         last_answers = cur.fetchall()
 
@@ -473,9 +517,30 @@ def get_final_test(completion_id: int):
 
 @app.post("/courses/{completion_id}/final-test/submit")
 async def submit_final_test(completion_id: int, payload: SubmitTestRequest):
-    submitted_at = datetime.utcnow()
     with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT id_program FROM program_completion WHERE id_program_completion = %s",
+            (completion_id,),
+        )
+        completion = cur.fetchone()
+        if not completion:
+            raise HTTPException(status_code=404, detail="Курс не найден")
+
+        cur.execute(
+            "SELECT id_employee FROM program_completion WHERE id_program_completion = %s",
+            (completion_id,),
+        )
+        employee = cur.fetchone()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Прохождение курса не найдено")
+
+        questions = _load_final_test_questions(cur, completion["id_program"])
+        question_ids = [q["id_question"] for q in questions]
+
+        submitted_at = datetime.utcnow()
         for item in payload.answers:
+            if item["id_question"] not in question_ids:
+                raise HTTPException(status_code=400, detail="Ответ относится к неизвестному вопросу финального теста")
             cur.execute(
                 "INSERT INTO test_completion (id_program_completion, id_answer, is_final_test, submitted_at) "
                 "VALUES (%s, %s, true, %s)",
@@ -488,18 +553,7 @@ async def submit_final_test(completion_id: int, payload: SubmitTestRequest):
         )
         graded = cur.fetchall()
 
-        cur.execute(
-            "SELECT id_employee, id_program FROM program_completion WHERE id_program_completion = %s",
-            (completion_id,),
-        )
-        completion = cur.fetchone()
-
-        cur.execute(
-            "SELECT COUNT(*) AS count FROM question q JOIN topic t ON t.id_topic = q.id_topic "
-            "WHERE t.id_program = %s",
-            (completion["id_program"],),
-        )
-        total_questions = cur.fetchone()["count"]
+        total_questions = len(question_ids)
 
         # Неотвеченные вопросы (например, из-за истечения времени) считаются неверными:
         # процент считается от общего числа вопросов, а не только от отправленных ответов.
@@ -517,7 +571,7 @@ async def submit_final_test(completion_id: int, payload: SubmitTestRequest):
         cur.execute("DELETE FROM test_session WHERE id_employee = %s", (payload.employee_id,))
 
     if passed:
-        await notify_lms(completion["id_employee"], "Курс успешно завершён")
+        await notify_lms(employee["id_employee"], "Курс успешно завершён")
 
     return {"percent": percent, "passed": passed}
 
