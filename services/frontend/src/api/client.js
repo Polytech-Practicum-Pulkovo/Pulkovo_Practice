@@ -48,6 +48,11 @@ export function post(baseUrl, path, body) {
   return request(baseUrl, path, { method: "POST", body: JSON.stringify(body ?? {}) });
 }
 
+export function postForm(baseUrl, path, formData) {
+  // Не задаём Content-Type вручную — браузер сам проставит multipart-boundary.
+  return request(baseUrl, path, { method: "POST", body: formData, headers: {} });
+}
+
 export function put(baseUrl, path, body) {
   return request(baseUrl, path, { method: "PUT", body: JSON.stringify(body ?? {}) });
 }

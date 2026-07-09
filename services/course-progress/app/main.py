@@ -1,12 +1,16 @@
+import os
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.catalogs import list_catalog_files
 from app.clients import ask_ai_assistant, notify_lms
 from app.db import get_cursor
+
+LEARNING_MATERIALS_DIR = os.getenv("LEARNING_MATERIALS_DIR", "/app/learning_materials")
 
 app = FastAPI(title="Прохождение курса")
 
@@ -262,18 +266,22 @@ async def submit_final_test(completion_id: int, payload: SubmitTestRequest):
             (completion_id,),
         )
         completion = cur.fetchone()
-        cur.execute(
-            "UPDATE program_completion SET end_date = %s WHERE id_program_completion = %s",
-            (datetime.utcnow(), completion_id),
-        )
 
-    correct = sum(1 for row in graded if row["is_correct"])
-    percent = round(100 * correct / len(graded)) if graded else 0
+        correct = sum(1 for row in graded if row["is_correct"])
+        percent = round(100 * correct / len(graded)) if graded else 0
+        passed = percent >= 80
 
-    if percent >= 80:
+        # Курс считается завершённым только при успешном прохождении итогового теста.
+        if passed:
+            cur.execute(
+                "UPDATE program_completion SET end_date = %s WHERE id_program_completion = %s",
+                (datetime.utcnow(), completion_id),
+            )
+
+    if passed:
         await notify_lms(completion["id_employee"], "Курс успешно завершён")
 
-    return {"percent": percent, "passed": percent >= 80}
+    return {"percent": percent, "passed": passed}
 
 
 @app.post("/courses/{completion_id}/materials/{material_id}/read")
@@ -290,6 +298,29 @@ def mark_material_read(completion_id: int, material_id: int):
         )
 
     return {"status": "read"}
+
+
+@app.get("/materials/{material_id}/file")
+def get_material_file(material_id: int):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT file_link FROM learning_material WHERE id_learning_material = %s",
+            (material_id,),
+        )
+        material = cur.fetchone()
+
+    if not material:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+
+    path = os.path.join(LEARNING_MATERIALS_DIR, material["file_link"])
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Файл материала не найден")
+
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=material["file_link"],
+    )
 
 
 @app.post("/courses/{completion_id}/topics/{topic_id}/submit-test")
@@ -312,7 +343,12 @@ async def submit_topic_test(completion_id: int, topic_id: int, payload: SubmitTe
         )
         graded = cur.fetchall()
 
-        if payload.is_final_test:
+        correct = sum(1 for row in graded if row["is_correct"])
+        percent = round(100 * correct / len(graded)) if graded else 0
+        passed = percent >= 80
+
+        completion = None
+        if payload.is_final_test and passed:
             cur.execute(
                 "SELECT id_employee FROM program_completion WHERE id_program_completion = %s",
                 (completion_id,),
@@ -323,10 +359,7 @@ async def submit_topic_test(completion_id: int, topic_id: int, payload: SubmitTe
                 (datetime.utcnow(), completion_id),
             )
 
-    correct = sum(1 for row in graded if row["is_correct"])
-    percent = round(100 * correct / len(graded)) if graded else 0
-
-    if payload.is_final_test and percent >= 80:
+    if completion:
         await notify_lms(completion["id_employee"], "Курс успешно завершён")
 
     return {"percent": percent, "passed": percent >= 80}
@@ -365,13 +398,17 @@ async def submit_result(completion_id: int, payload: ResultRequest):
         )
         result = cur.fetchone()
 
-        if payload.is_final_test:
+        cur.execute("SELECT is_correct FROM answer WHERE id_answer = %s", (payload.id_answer,))
+        answer = cur.fetchone()
+
+        # Курс считается завершённым только при успешном прохождении итогового теста.
+        if payload.is_final_test and answer and answer["is_correct"]:
             cur.execute(
                 "UPDATE program_completion SET end_date = %s WHERE id_program_completion = %s",
                 (datetime.utcnow(), completion_id),
             )
 
-    if payload.is_final_test:
+    if payload.is_final_test and answer and answer["is_correct"]:
         await notify_lms(completion["id_employee"], "Курс успешно завершён")
 
     return {"status": "recorded", "id_test_completion": result["id_test_completion"]}

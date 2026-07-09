@@ -1,7 +1,7 @@
-export function roleFromPosition(position) {
-  if (!position) return "employee";
-  if (position.includes("Администратор")) return "admin";
-  if (position.includes("Специалист")) return "specialist";
+export function roleSlugFromRoleName(roleName) {
+  if (!roleName) return "employee";
+  if (roleName.includes("Администратор")) return "admin";
+  if (roleName.includes("Специалист")) return "specialist";
   return "employee";
 }
 
@@ -10,6 +10,18 @@ export const ROLE_LABELS = {
   specialist: "Специалист по ОТ",
   admin: "Администратор",
 };
+
+// Каждая следующая роль расширяет предыдущую: Специалист по ОТ включает весь
+// функционал Работника, Администратор — весь функционал Специалиста по ОТ.
+export const ROLE_LEVEL = {
+  employee: 1,
+  specialist: 2,
+  admin: 3,
+};
+
+export function roleHasAccess(role, minRole) {
+  return (ROLE_LEVEL[role] ?? 0) >= (ROLE_LEVEL[minRole] ?? 0);
+}
 
 export function fullName(person) {
   if (!person) return "";

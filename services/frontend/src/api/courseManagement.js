@@ -1,5 +1,5 @@
 import { API } from "./config";
-import { get, post, put, del } from "./client";
+import { get, post, postForm, put, del } from "./client";
 
 const base = API.courseManagement;
 
@@ -13,6 +13,10 @@ export function getProgram(programId) {
 
 export function createProgram(payload) {
   return post(base, "/programs", payload);
+}
+
+export function updateProgram(programId, payload) {
+  return put(base, `/programs/${programId}`, payload);
 }
 
 export function deleteProgram(programId) {
@@ -57,6 +61,16 @@ export function addTopicsAi(idProgram, candidateTopics) {
 
 export function deleteTopic(topicId) {
   return del(base, `/topics/${topicId}`);
+}
+
+export function uploadMaterial(topicId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return postForm(base, `/topics/${topicId}/materials`, formData);
+}
+
+export function deleteMaterial(materialId) {
+  return del(base, `/materials/${materialId}`);
 }
 
 export function generateQuestions(idTopic, count = 5) {

@@ -1,10 +1,11 @@
 import { Navigate, Outlet } from "react-router-dom";
+import { roleHasAccess } from "../utils/role";
 import { useAuth } from "./AuthContext";
 
-export default function RequireRole({ roles }) {
+export default function RequireRole({ minRole }) {
   const { role } = useAuth();
 
-  if (!roles.includes(role)) {
+  if (!roleHasAccess(role, minRole)) {
     return <Navigate to="/app/profile" replace />;
   }
 

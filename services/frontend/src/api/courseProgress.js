@@ -15,6 +15,10 @@ export function markMaterialRead(completionId, materialId) {
   return post(base, `/courses/${completionId}/materials/${materialId}/read`);
 }
 
+export function materialFileUrl(materialId) {
+  return `${base}/materials/${materialId}/file`;
+}
+
 export function navigate(completionId, fromSection, toSection, testInProgress) {
   return post(base, `/courses/${completionId}/navigate`, {
     from_section: fromSection,

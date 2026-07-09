@@ -75,6 +75,19 @@ a {
   margin-bottom: 6px;
 }
 
+.field-static label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.field-static .value {
+  font-size: 15px;
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
 .field input {
   width: 100%;
   padding: 10px 12px;
@@ -139,6 +152,24 @@ a {
   text-decoration: underline;
   font-size: 14px;
   padding: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+}
+.icon-btn:hover {
+  background: var(--gray-bg);
 }
 
 .alert {
@@ -227,6 +258,14 @@ a {
   color: rgba(255, 255, 255, 0.85);
   text-decoration: none;
   font-size: 14px;
+}
+
+.nav-badge {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--red);
+  display: inline-block;
 }
 
 .sidebar-nav a:hover {

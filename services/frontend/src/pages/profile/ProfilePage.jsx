@@ -29,25 +29,29 @@ export default function ProfilePage() {
       </div>
 
       <div className="card" style={{ maxWidth: 480 }}>
-        <div className="field">
+        <div className="field-static">
           <label>ФИО</label>
-          <input readOnly value={fullName(employee)} />
+          <div className="value">{fullName(employee)}</div>
         </div>
-        <div className="field">
+        <div className="field-static">
           <label>Email</label>
-          <input readOnly value={employee?.email || ""} />
+          <div className="value">{employee?.email || "—"}</div>
         </div>
-        <div className="field">
+        <div className="field-static">
           <label>Табельный номер</label>
-          <input readOnly value={employee?.employee_number || ""} />
+          <div className="value">{employee?.employee_number || "—"}</div>
         </div>
-        <div className="field">
+        <div className="field-static">
+          <label>Роль</label>
+          <div className="value">{employee?.role || ROLE_LABELS[role]}</div>
+        </div>
+        <div className="field-static">
           <label>Должность</label>
-          <input readOnly value={employee?.position || ROLE_LABELS[role]} />
+          <div className="value">{employee?.position || "—"}</div>
         </div>
-        <div className="field">
+        <div className="field-static">
           <label>Подразделение</label>
-          <input readOnly value={employee?.department || ""} />
+          <div className="value">{employee?.department || "—"}</div>
         </div>
       </div>
 

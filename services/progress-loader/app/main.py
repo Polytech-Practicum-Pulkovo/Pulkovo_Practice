@@ -15,30 +15,63 @@ app.add_middleware(
 )
 
 
-def _progress_percent(cur, completion_id: int) -> int:
-    cur.execute(
-        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_read) AS done "
-        "FROM material_study WHERE id_program_completion = %s",
-        (completion_id,),
-    )
-    materials = cur.fetchone()
+def _test_passed(cur, completion_id: int, id_topic: int | None, id_program: int, is_final: bool) -> bool:
+    """Пройден ли данный тест (промежуточный по теме или итоговый) — по корректности
+    последней попытки. Изучение материалов на результат не влияет."""
+    if is_final:
+        cur.execute(
+            """
+            SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE a.is_correct) AS correct
+            FROM (
+                SELECT DISTINCT ON (a.id_question) a.id_question, a.is_correct
+                FROM test_completion tc
+                JOIN answer a ON a.id_answer = tc.id_answer
+                JOIN question q ON q.id_question = a.id_question
+                JOIN topic t ON t.id_topic = q.id_topic
+                WHERE tc.id_program_completion = %s AND t.id_program = %s
+                  AND tc.is_final_test = true
+                ORDER BY a.id_question, tc.id_test_completion DESC
+            ) a
+            """,
+            (completion_id, id_program),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE a.is_correct) AS correct
+            FROM (
+                SELECT DISTINCT ON (a.id_question) a.id_question, a.is_correct
+                FROM test_completion tc
+                JOIN answer a ON a.id_answer = tc.id_answer
+                JOIN question q ON q.id_question = a.id_question
+                WHERE tc.id_program_completion = %s AND q.id_topic = %s
+                  AND tc.is_final_test = false
+                ORDER BY a.id_question, tc.id_test_completion DESC
+            ) a
+            """,
+            (completion_id, id_topic),
+        )
+    attempt = cur.fetchone()
+    return bool(attempt["total"]) and round(100 * attempt["correct"] / attempt["total"]) >= 80
 
-    cur.execute(
-        """
-        SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE a.is_correct) AS done
-        FROM test_completion tc
-        JOIN answer a ON a.id_answer = tc.id_answer
-        WHERE tc.id_program_completion = %s
-        """,
-        (completion_id,),
-    )
-    tests = cur.fetchone()
 
-    total = materials["total"] + tests["total"]
-    done = materials["done"] + tests["done"]
-    if total == 0:
-        return 0
-    return round(100 * done / total)
+def _progress_percent(cur, completion_id: int, id_program: int) -> int:
+    """
+    Процент прохождения курса = доля успешно завершённых тестов (промежуточных
+    по темам + итоговый) от их общего числа. Изучение материалов на процент
+    не влияет.
+    """
+    cur.execute("SELECT id_topic FROM topic WHERE id_program = %s", (id_program,))
+    topics = cur.fetchall()
+
+    total_tests = len(topics) + 1  # + итоговый тест
+    passed_tests = sum(
+        1 for topic in topics if _test_passed(cur, completion_id, topic["id_topic"], id_program, False)
+    )
+    if _test_passed(cur, completion_id, None, id_program, True):
+        passed_tests += 1
+
+    return round(100 * passed_tests / total_tests)
 
 
 @app.get("/health")
@@ -66,7 +99,9 @@ def list_program_completions(employee_id: Optional[int] = None, with_progress: b
 
         if with_progress:
             for row in rows:
-                row["progress_percent"] = _progress_percent(cur, row["id_program_completion"])
+                row["progress_percent"] = _progress_percent(
+                    cur, row["id_program_completion"], row["id_program"]
+                )
 
     return rows
 
@@ -126,8 +161,8 @@ def journal(
     date_to: Optional[str] = None,
 ):
     query = """
-        SELECT pc.id_program_completion, e.employee_number, e.first_name, e.last_name,
-               e.middle_name, p.name AS program_name, pc.start_date, pc.end_date,
+        SELECT pc.id_program_completion, pc.id_program, e.employee_number, e.first_name,
+               e.last_name, e.middle_name, p.name AS program_name, pc.start_date, pc.end_date,
                e.id_department, e.id_position
         FROM program_completion pc
         JOIN employee e ON e.id_employee = pc.id_employee
@@ -162,7 +197,9 @@ def journal(
         cur.execute(query, params)
         rows = cur.fetchall()
         for row in rows:
-            row["progress_percent"] = _progress_percent(cur, row["id_program_completion"])
+            row["progress_percent"] = _progress_percent(
+                cur, row["id_program_completion"], row["id_program"]
+            )
 
     return rows
 

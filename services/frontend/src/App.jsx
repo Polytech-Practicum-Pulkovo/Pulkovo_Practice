@@ -49,7 +49,7 @@ export default function App() {
               <Route path="profile" element={<ProfilePage />} />
               <Route path="profile/change-password" element={<ChangePasswordPage />} />
 
-              <Route element={<RequireRole roles={["employee"]} />}>
+              <Route element={<RequireRole minRole="employee" />}>
                 <Route path="courses" element={<CoursesListPage />} />
                 <Route path="courses/:completionId" element={<CourseDetailPage />} />
                 <Route path="courses/:completionId/final-test" element={<FinalTestPage />} />
@@ -57,12 +57,12 @@ export default function App() {
                 <Route path="notifications" element={<NotificationsPage />} />
               </Route>
 
-              <Route element={<RequireRole roles={["specialist"]} />}>
+              <Route element={<RequireRole minRole="specialist" />}>
                 <Route path="questions" element={<QuestionBankPage />} />
                 <Route path="results" element={<ResultsPage />} />
               </Route>
 
-              <Route element={<RequireRole roles={["admin"]} />}>
+              <Route element={<RequireRole minRole="admin" />}>
                 <Route path="admin/courses" element={<CourseManagementPage />} />
                 <Route path="admin/courses/new" element={<CreateCoursePage />} />
               </Route>

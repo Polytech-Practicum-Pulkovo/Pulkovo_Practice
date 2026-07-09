@@ -1,12 +1,16 @@
+import os
+import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.clients import generate_questions, generate_topic_distribution
 from app.db import get_cursor
+
+LEARNING_MATERIALS_DIR = os.getenv("LEARNING_MATERIALS_DIR", "/app/learning_materials")
 
 app = FastAPI(title="Управление курсами")
 
@@ -46,8 +50,12 @@ class QuestionUpdateRequest(BaseModel):
 class ProgramCreateRequest(BaseModel):
     name: str
     program_code: str
-    time_to_complete: Optional[int] = None  # в минутах
+    time_to_complete: Optional[int] = None  # в часах
     id_type: int = 1
+
+
+class ProgramUpdateRequest(BaseModel):
+    time_to_complete: Optional[int] = None  # в часах
 
 
 class LiteratureRequest(BaseModel):
@@ -147,6 +155,31 @@ def create_program(payload: ProgramCreateRequest):
         result = cur.fetchone()
 
     return {"id_program": result["id_program"]}
+
+
+@app.put("/programs/{program_id}")
+def update_program(program_id: int, payload: ProgramUpdateRequest):
+    fields = []
+    params = []
+    if payload.time_to_complete is not None:
+        fields.append("time_to_complete = %s")
+        params.append(payload.time_to_complete)
+
+    if not fields:
+        raise HTTPException(status_code=400, detail="Нечего обновлять")
+
+    params.append(program_id)
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE program SET {', '.join(fields)} WHERE id_program = %s RETURNING id_program",
+            params,
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Программа не найдена")
+
+    return {"status": "updated"}
 
 
 @app.delete("/programs/{program_id}")
@@ -324,6 +357,53 @@ def delete_topic(topic_id: int):
 
     if not result:
         raise HTTPException(status_code=404, detail="Тема не найдена")
+
+    return {"status": "deleted"}
+
+
+@app.post("/topics/{topic_id}/materials")
+async def upload_material(topic_id: int, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Допустимы только PPTX-файлы")
+
+    with get_cursor() as cur:
+        cur.execute("SELECT 1 FROM topic WHERE id_topic = %s", (topic_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Тема не найдена")
+
+    os.makedirs(LEARNING_MATERIALS_DIR, exist_ok=True)
+    stored_name = f"{uuid.uuid4().hex}_{file.filename}"
+    with open(os.path.join(LEARNING_MATERIALS_DIR, stored_name), "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "INSERT INTO learning_material (id_topic, file_link) VALUES (%s, %s) "
+            "RETURNING id_learning_material",
+            (topic_id, stored_name),
+        )
+        material_id = cur.fetchone()["id_learning_material"]
+
+    return {"id_learning_material": material_id, "file_link": stored_name, "original_name": file.filename}
+
+
+@app.delete("/materials/{material_id}")
+def delete_material(material_id: int):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM learning_material WHERE id_learning_material = %s RETURNING file_link",
+            (material_id,),
+        )
+        result = cur.fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+
+    try:
+        os.remove(os.path.join(LEARNING_MATERIALS_DIR, result["file_link"]))
+    except OSError:
+        pass
 
     return {"status": "deleted"}
 

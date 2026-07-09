@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { askAssistant, createComplaint, getTopic, markMaterialRead, submitTopicTest } from "../../api/courseProgress";
+import {
+  askAssistant,
+  createComplaint,
+  getTopic,
+  markMaterialRead,
+  materialFileUrl,
+  submitTopicTest,
+} from "../../api/courseProgress";
 import { useAuth } from "../../auth/AuthContext";
 import TestPanel from "../../components/TestPanel";
 
 const TABS = ["materials", "chat", "test"];
 const TAB_LABEL = { materials: "Материалы по теме", chat: "Чат с AI", test: "Контрольный тест" };
+
+function materialDisplayName(fileLink) {
+  return fileLink.replace(/^[0-9a-f]{32}_/, "");
+}
 
 export default function TopicPage() {
   const { completionId, topicId } = useParams();
@@ -74,16 +85,20 @@ export default function TopicPage() {
         {tab === "materials" && (
           <div>
             {topic.materials.map((m) => (
-              <div key={m.id_learning_material} className="row-between mb-16">
-                <a href={m.file_link} target="_blank" rel="noreferrer">
-                  {m.file_link}
-                </a>
+              <div key={m.id_learning_material} className="card row-between mb-16">
+                <div>📊 {materialDisplayName(m.file_link)}</div>
                 {m.is_read ? (
                   <span className="badge badge-green">Изучено</span>
                 ) : (
-                  <button className="btn btn-secondary" onClick={() => handleMarkRead(m.id_learning_material)}>
-                    Отметить изученным
-                  </button>
+                  <a
+                    className="btn btn-secondary"
+                    href={materialFileUrl(m.id_learning_material)}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => handleMarkRead(m.id_learning_material)}
+                  >
+                    Скачать презентацию
+                  </a>
                 )}
               </div>
             ))}

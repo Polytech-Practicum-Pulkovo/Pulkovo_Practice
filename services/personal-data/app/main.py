@@ -54,10 +54,11 @@ def login(payload: LoginRequest):
             """
             SELECT e.id_employee, e.first_name, e.last_name, e.middle_name,
                    e.employee_number, e.email, e.password_hash,
-                   d.name AS department, p.name AS position
+                   d.name AS department, p.name AS position, r.name AS role
             FROM employee e
             LEFT JOIN department d ON d.id_department = e.id_department
             LEFT JOIN position p ON p.id_position = e.id_position
+            LEFT JOIN employee_role r ON r.id_role = e.id_role
             WHERE e.employee_number = %s
             """,
             (payload.employee_number,),
@@ -157,10 +158,12 @@ def get_employee(employee_id: int):
         cur.execute(
             """
             SELECT e.id_employee, e.employee_number, e.first_name, e.last_name,
-                   e.middle_name, e.email, d.name AS department, p.name AS position
+                   e.middle_name, e.email, d.name AS department, p.name AS position,
+                   r.name AS role
             FROM employee e
             LEFT JOIN department d ON d.id_department = e.id_department
             LEFT JOIN position p ON p.id_position = e.id_position
+            LEFT JOIN employee_role r ON r.id_role = e.id_role
             WHERE e.id_employee = %s
             """,
             (employee_id,),

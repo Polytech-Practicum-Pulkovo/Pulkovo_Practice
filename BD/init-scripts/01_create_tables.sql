@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS position(
     name        varchar(128) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS employee_role(
+    id_role int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        varchar(128) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS training_type(
     id_type int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name    varchar(128) NOT NULL
@@ -85,6 +90,7 @@ CREATE TABLE IF NOT EXISTS employee(
     id_employee        int         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     id_department       int,
     id_position         int,
+    id_role             int,
     employee_number     int         NOT NULL UNIQUE,
     first_name          varchar(64) NOT NULL,
     last_name           varchar(64) NOT NULL,
@@ -103,6 +109,12 @@ CREATE TABLE IF NOT EXISTS employee(
     CONSTRAINT employee_pos_fk
         FOREIGN KEY (id_position)
         REFERENCES position(id_position)
+        ON UPDATE SET NULL
+        ON DELETE SET NULL,
+
+    CONSTRAINT employee_role_fk
+        FOREIGN KEY (id_role)
+        REFERENCES employee_role(id_role)
         ON UPDATE SET NULL
         ON DELETE SET NULL
 );

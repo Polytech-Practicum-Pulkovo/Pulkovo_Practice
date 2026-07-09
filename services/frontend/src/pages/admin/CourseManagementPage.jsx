@@ -121,7 +121,7 @@ export default function CourseManagementPage() {
             <div>
               <strong>{p.name}</strong>
               <div>Номер: {p.program_code}</div>
-              <div>Время на выполнение: {p.time_to_complete ? `${p.time_to_complete} мин` : "—"}</div>
+              <div>Время на выполнение: {p.time_to_complete ? `${p.time_to_complete} ч` : "—"}</div>
               <div>Тем в курсе: {p.topic_count}</div>
             </div>
             <div className="row" style={{ flexDirection: "column" }}>

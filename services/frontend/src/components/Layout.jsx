@@ -1,23 +1,44 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { fullName, initials, ROLE_LABELS } from "../utils/role";
+import { NotificationsProvider, useNotifications } from "../notifications/NotificationsContext";
+import { fullName, initials, ROLE_LABELS, ROLE_LEVEL } from "../utils/role";
 import Modal from "./Modal";
 
-const NAV_BY_ROLE = {
-  employee: [
+// Каждый уровень добавляется к предыдущему: Специалист по ОТ видит разделы
+// Работника + свои, Администратор — разделы Специалиста + свои.
+const NAV_BY_LEVEL = {
+  1: [
     { to: "/app/courses", label: "Мои курсы" },
-    { to: "/app/notifications", label: "Уведомления" },
+    { to: "/app/notifications", label: "Уведомления", badge: "notifications" },
   ],
-  specialist: [
+  2: [
     { to: "/app/questions", label: "Банк вопросов" },
     { to: "/app/results", label: "Результаты обучения" },
   ],
-  admin: [{ to: "/app/admin/courses", label: "Управление курсами" }],
+  3: [{ to: "/app/admin/courses", label: "Управление курсами" }],
 };
 
+function navItemsForRole(role) {
+  const level = ROLE_LEVEL[role] ?? 1;
+  return Object.keys(NAV_BY_LEVEL)
+    .map(Number)
+    .filter((itemLevel) => itemLevel <= level)
+    .sort((a, b) => a - b)
+    .flatMap((itemLevel) => NAV_BY_LEVEL[itemLevel]);
+}
+
 export default function Layout() {
+  return (
+    <NotificationsProvider>
+      <LayoutInner />
+    </NotificationsProvider>
+  );
+}
+
+function LayoutInner() {
   const { employee, role, logout } = useAuth();
+  const { unreadCount } = useNotifications();
   const navigate = useNavigate();
   const [confirmingLogout, setConfirmingLogout] = useState(false);
 
@@ -26,7 +47,7 @@ export default function Layout() {
     navigate("/login");
   }
 
-  const navItems = [{ to: "/app/profile", label: "Личный кабинет" }, ...(NAV_BY_ROLE[role] || [])];
+  const navItems = [{ to: "/app/profile", label: "Личный кабинет" }, ...navItemsForRole(role)];
 
   return (
     <div className="app-shell">
@@ -48,6 +69,7 @@ export default function Layout() {
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? "active" : "")}>
               {item.label}
+              {item.badge === "notifications" && unreadCount > 0 && <span className="nav-badge" />}
             </NavLink>
           ))}
         </nav>

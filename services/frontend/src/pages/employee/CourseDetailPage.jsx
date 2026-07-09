@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getCourse } from "../../api/courseProgress";
+import { getCourse, getFinalTest } from "../../api/courseProgress";
 import { getProgram } from "../../api/courseManagement";
 import Modal from "../../components/Modal";
 
@@ -13,6 +13,7 @@ const STATUS_LABEL = {
 export default function CourseDetailPage() {
   const { completionId } = useParams();
   const [course, setCourse] = useState(null);
+  const [finalTest, setFinalTest] = useState(null);
   const [literature, setLiterature] = useState([]);
   const [showLiterature, setShowLiterature] = useState(false);
 
@@ -23,6 +24,7 @@ export default function CourseDetailPage() {
       setCourse(data);
       getProgram(data.id_program).then((program) => alive && setLiterature(program.literature || []));
     });
+    getFinalTest(completionId).then((data) => alive && setFinalTest(data));
     return () => {
       alive = false;
     };
@@ -31,9 +33,13 @@ export default function CourseDetailPage() {
   if (!course) return <p>Загрузка…</p>;
 
   const allPassed = course.topics.every((t) => t.status === "passed");
-  const avgProgress = course.topics.length
-    ? Math.round(course.topics.reduce((sum, t) => sum + t.progress_percent, 0) / course.topics.length)
-    : 0;
+
+  // Процент прохождения = доля успешно пройденных тестов (темы + итоговый),
+  // изучение материалов на него не влияет.
+  const totalTests = course.topics.length + 1;
+  const passedTopics = course.topics.filter((t) => t.status === "passed").length;
+  const passedFinal = finalTest?.last_attempt?.passed ? 1 : 0;
+  const overallPercent = Math.round((100 * (passedTopics + passedFinal)) / totalTests);
 
   return (
     <div>
@@ -46,9 +52,9 @@ export default function CourseDetailPage() {
           Статус: {course.end_date ? "Завершён" : "В процессе"}
           <div className="row mt-16">
             <div className="progress-bar">
-              <div className="progress-bar-fill" style={{ width: `${avgProgress}%` }} />
+              <div className="progress-bar-fill" style={{ width: `${overallPercent}%` }} />
             </div>
-            <span>{avgProgress}%</span>
+            <span>{overallPercent}%</span>
           </div>
         </div>
       </div>

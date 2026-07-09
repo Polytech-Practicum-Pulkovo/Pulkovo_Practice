@@ -4,6 +4,32 @@ import { changePassword } from "../../api/personalData";
 import { useAuth } from "../../auth/AuthContext";
 import Modal from "../../components/Modal";
 
+function PasswordField({ label, value, onChange }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div className="row" style={{ position: "relative" }}>
+        <input
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          required
+          style={{ flex: 1 }}
+        />
+        <button
+          type="button"
+          className="link-button"
+          style={{ position: "absolute", right: 10 }}
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? "🙈" : "👁"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ChangePasswordPage() {
   const { employee } = useAuth();
   const navigate = useNavigate();
@@ -12,14 +38,16 @@ export default function ChangePasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [result, setResult] = useState(null); // "success" | "error" | null
+  const [errorReason, setErrorReason] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setResult(null);
 
     if (newPassword !== confirmPassword) {
-      setError("Пароли не совпадают, проверьте ввод");
+      setError("Новый пароль и подтверждение не совпадают, проверьте ввод");
       return;
     }
 
@@ -27,7 +55,8 @@ export default function ChangePasswordPage() {
     try {
       await changePassword(employee.id_employee, oldPassword, newPassword);
       setResult("success");
-    } catch {
+    } catch (err) {
+      setErrorReason(err.message || "Неизвестная ошибка");
       setResult("error");
     } finally {
       setLoading(false);
@@ -38,23 +67,13 @@ export default function ChangePasswordPage() {
     <div>
       <h1>Смена пароля</h1>
       <form className="card" style={{ maxWidth: 480 }} onSubmit={handleSubmit}>
-        <div className="field">
-          <label>Введите старый пароль</label>
-          <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} required />
-        </div>
-        <div className="field">
-          <label>Введите новый пароль</label>
-          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-        </div>
-        <div className="field">
-          <label>Повторите пароль</label>
-          <input
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-          />
-        </div>
+        <PasswordField label="Введите старый пароль" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} />
+        <PasswordField label="Введите новый пароль" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+        <PasswordField
+          label="Повторите пароль"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
         {error && <div className="alert alert-error">⚠ {error}</div>}
         <button className="btn btn-primary" type="submit" disabled={loading}>
           {loading ? "Сохраняем…" : "Сменить пароль"}
@@ -73,7 +92,7 @@ export default function ChangePasswordPage() {
       {result === "error" && (
         <Modal onClose={() => setResult(null)}>
           <h3 style={{ color: "var(--red-dark)" }}>Не удалось изменить пароль</h3>
-          <p>Повторите попытку заново или обратитесь к администратору</p>
+          <p>{errorReason}</p>
           <button className="btn btn-primary" onClick={() => setResult(null)}>
             Повторить попытку
           </button>

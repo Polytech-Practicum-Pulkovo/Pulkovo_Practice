@@ -81,8 +81,10 @@ services:
       NOTIFICATIONS_URL: http://notifications:8000
       AI_GENERATION_URL: http://ai-generation:8000
       CATALOGS_DIR: /app/catalogs
+      LEARNING_MATERIALS_DIR: /app/learning_materials
     volumes:
       - ./catalogs:/app/catalogs:ro
+      - ./catalogs/learning_materials:/app/learning_materials:ro
     depends_on:
       bd:
         condition: service_healthy
@@ -100,6 +102,9 @@ services:
     environment:
       <<: *db-env
       AI_GENERATION_URL: http://ai-generation:8000
+      LEARNING_MATERIALS_DIR: /app/learning_materials
+    volumes:
+      - ./catalogs/learning_materials:/app/learning_materials
     depends_on:
       bd:
         condition: service_healthy

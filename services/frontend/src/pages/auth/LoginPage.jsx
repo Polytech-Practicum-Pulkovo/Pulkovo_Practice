@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { login as apiLogin } from "../../api/personalData";
 import { useAuth } from "../../auth/AuthContext";
-import { roleFromPosition } from "../../utils/role";
+import { roleSlugFromRoleName } from "../../utils/role";
 
 const HOME_BY_ROLE = {
   employee: "/app/courses",
@@ -26,7 +26,7 @@ export default function LoginPage() {
     try {
       const employee = await apiLogin(employeeNumber, password);
       login(employee);
-      navigate(HOME_BY_ROLE[roleFromPosition(employee.position)] || "/app/profile");
+      navigate(HOME_BY_ROLE[roleSlugFromRoleName(employee.role)] || "/app/profile");
     } catch {
       setError("Неверный табельный номер или пароль");
     } finally {

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { roleFromPosition } from "../utils/role";
+import { roleSlugFromRoleName } from "../utils/role";
 
 const AuthContext = createContext(null);
 
@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
   const value = useMemo(
     () => ({
       employee,
-      role: roleFromPosition(employee?.position),
+      role: roleSlugFromRoleName(employee?.role),
       isAuthenticated: Boolean(employee),
       login,
       logout,
