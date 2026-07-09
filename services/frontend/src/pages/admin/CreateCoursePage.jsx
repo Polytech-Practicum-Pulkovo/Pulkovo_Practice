@@ -1,6 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { addLiterature, addTopicManual, createProgram, updateProgram, uploadMaterial } from "../../api/courseManagement";
+import {
+  addLiterature,
+  addTopicManual,
+  createProgram,
+  generateQuestions,
+  listPrograms,
+  parseProgramFile,
+  updateProgram,
+  uploadMaterial,
+} from "../../api/courseManagement";
+import { ApiError } from "../../api/client";
 import Modal from "../../components/Modal";
 
 const STEPS = ["program", "distribution", "materials"];
@@ -24,10 +34,22 @@ export default function CreateCoursePage() {
   const [name, setName] = useState("");
   const [programCode, setProgramCode] = useState("");
   const [programError, setProgramError] = useState("");
+  const [existingCodes, setExistingCodes] = useState(new Set());
+
+  useEffect(() => {
+    listPrograms()
+      .then((list) => setExistingCodes(new Set(list.map((p) => String(p.program_code).trim()))))
+      .catch(() => {});
+  }, []);
+
+  const trimmedCode = programCode.trim();
+  const codeTaken = trimmedCode !== "" && existingCodes.has(trimmedCode);
 
   const [topics, setTopics] = useState([]);
   const [hours, setHours] = useState("");
   const [distributionError, setDistributionError] = useState("");
+  const [aiParsing, setAiParsing] = useState(false);
+  const [aiParseNotice, setAiParseNotice] = useState("");
 
   const [materials, setMaterials] = useState({}); // { [topicKey]: [{key, file}] }
   const [materialsError, setMaterialsError] = useState("");
@@ -43,15 +65,36 @@ export default function CreateCoursePage() {
       setProgramError("Загрузите файл программы обучения перед тем, как продолжить");
       return;
     }
+    if (codeTaken) {
+      setProgramError("Программа с таким номером уже существует");
+      return;
+    }
     setProgramError("");
     setConfirmMethodOpen(true);
   }
 
-  function handleChooseMethod() {
-    // ИИ-модуль ещё не подключён — обе кнопки пока ведут к одной и той же
-    // форме ручного заполнения.
+  function handleChooseManual() {
     setConfirmMethodOpen(false);
     setStep(1);
+  }
+
+  async function handleChooseAi() {
+    setAiParsing(true);
+    setAiParseNotice("");
+    try {
+      const result = await parseProgramFile(programFile);
+      setTopics((result.topics || []).map((name) => ({ key: nextKey(), name })));
+      setLiterature((result.literature || []).map((name) => ({ key: nextKey(), name, link: "" })));
+      if (result.hours) setHours(String(result.hours));
+    } catch {
+      setAiParseNotice(
+        "Не удалось распознать файл автоматически — заполните темы, литературу и часы вручную."
+      );
+    } finally {
+      setAiParsing(false);
+      setConfirmMethodOpen(false);
+      setStep(1);
+    }
   }
 
   function addLocalTopic() {
@@ -137,6 +180,7 @@ export default function CreateCoursePage() {
         for (const material of materials[topic.key] || []) {
           await uploadMaterial(id_topic, material.file);
         }
+        await generateQuestions(id_topic, 15);
       }
 
       await updateProgram(id_program, { time_to_complete: Number(hours) });
@@ -146,8 +190,12 @@ export default function CreateCoursePage() {
       }
 
       navigate("/app/admin/courses");
-    } catch {
-      setMaterialsError("Не удалось сохранить курс. Попробуйте ещё раз.");
+    } catch (err) {
+      setMaterialsError(
+        err instanceof ApiError && err.status < 500
+          ? err.message
+          : "Не удалось сохранить курс. Попробуйте ещё раз."
+      );
     } finally {
       setSaving(false);
     }
@@ -181,11 +229,16 @@ export default function CreateCoursePage() {
             <div className="field">
               <label>Номер программы</label>
               <input value={programCode} onChange={(e) => setProgramCode(e.target.value)} required />
+              {codeTaken && (
+                <p style={{ color: "var(--red-dark)", fontSize: 13, marginTop: 4 }}>
+                  ⚠ Программа с таким номером уже существует
+                </p>
+              )}
             </div>
 
             {programError && <div className="alert alert-error">⚠ {programError}</div>}
 
-            <button className="btn btn-primary" type="submit">
+            <button className="btn btn-primary" type="submit" disabled={codeTaken}>
               Перейти к распределению по темам
             </button>
           </form>
@@ -193,6 +246,7 @@ export default function CreateCoursePage() {
 
         {STEPS[step] === "distribution" && (
           <div>
+            {aiParseNotice && <div className="alert alert-error mb-16">⚠ {aiParseNotice}</div>}
             <h3>Распределение по темам</h3>
             {topics.map((t) => (
               <div key={t.key} className="row mb-16">
@@ -295,13 +349,15 @@ export default function CreateCoursePage() {
         <Modal>
           <h3>Как определить темы, часы и литературу?</h3>
           <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            ИИ-модуль ещё не подключён — обе кнопки пока приводят к одной и той же форме ручного заполнения.
+            ИИ разберёт загруженный файл программы и предзаполнит темы, литературу и часы —
+            дальше их можно будет отредактировать как обычно.
           </p>
+          {aiParsing && <p>⏳ Анализируем файл с помощью ИИ…</p>}
           <div className="row mt-16">
-            <button className="btn btn-secondary" onClick={handleChooseMethod}>
+            <button className="btn btn-secondary" onClick={handleChooseAi} disabled={aiParsing}>
               ✨ С помощью ИИ
             </button>
-            <button className="btn btn-primary" onClick={handleChooseMethod}>
+            <button className="btn btn-primary" onClick={handleChooseManual} disabled={aiParsing}>
               Вручную
             </button>
           </div>

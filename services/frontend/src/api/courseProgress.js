@@ -1,5 +1,5 @@
 import { API } from "./config";
-import { get, post } from "./client";
+import { get, post, del } from "./client";
 
 const base = API.courseProgress;
 
@@ -58,4 +58,20 @@ export function askAssistant(employeeId, topicId, message, catalogFile) {
     message,
     catalog_file: catalogFile || null,
   });
+}
+
+export function getTestSession(employeeId) {
+  return get(base, `/employees/${employeeId}/test-session`);
+}
+
+export function startTestSession(employeeId, { idProgramCompletion, idTopic, isFinalTest }) {
+  return post(base, `/employees/${employeeId}/test-session/start`, {
+    id_program_completion: idProgramCompletion,
+    id_topic: idTopic ?? null,
+    is_final_test: isFinalTest,
+  });
+}
+
+export function clearTestSession(employeeId) {
+  return del(base, `/employees/${employeeId}/test-session`);
 }

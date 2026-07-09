@@ -1,22 +1,25 @@
 import asyncio
+import os
 import time
 import uuid
 
 import requests
-
-from app import config
 
 
 class GigaChatClient:
     """Обёртка над GigaChat API: получение токена + отправка сообщений."""
 
     def __init__(self):
-        self.auth_url = config.AUTH_URL
-        self.chat_url = config.CHAT_URL
-        self.model = config.MODEL
-        self.client_secret = config.CLIENT_SECRET
-        self.scope = getattr(config, "SCOPE", "GIGACHAT_API_B2B")
-        self.verify_ssl = getattr(config, "VERIFY_SSL", False)
+        """Сохраняет параметры подключения к GigaChat и сбрасывает токен."""
+
+        self.auth_url = os.getenv("GIGACHAT_AUTH_URL", "")
+        self.chat_url = os.getenv(
+            "GIGACHAT_CHAT_URL", ""
+        )
+        self.model = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Pro")
+        self.client_secret = os.getenv("GIGACHAT_CLIENT_SECRET", "")
+        self.scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_B2B")
+        self.verify_ssl = os.getenv("GIGACHAT_VERIFY_SSL", "false").lower() == "true"
 
         self._token = None
         self._token_expires_at = 0  # unix timestamp
@@ -45,19 +48,20 @@ class GigaChatClient:
         return self._token
 
     def _ensure_token(self):
+        """Гарантирует, что у клиента есть актуальный токен доступа."""
+
         if not self._token or time.time() >= self._token_expires_at:
             self._get_access_token()
         return self._token
 
     def complete(self, messages, temperature=0.7, max_tokens=None):
-        """
-        Синхронная обёртка над запросом к GigaChat. Используется в существующих
-        вызовах и не ломает совместимость.
-        """
+        """Синхронная обёртка над запросом к GigaChat для совместимости."""
+
         return self._complete_sync(messages, temperature=temperature, max_tokens=max_tokens)
 
     async def acomplete(self, messages, temperature=0.7, max_tokens=None):
-        """Асинхронная версия запроса к GigaChat."""
+        """Асинхронно отправляет сообщения в GigaChat и возвращает ответ."""
+
         token = self._ensure_token()
 
         headers = {
@@ -101,6 +105,8 @@ class GigaChatClient:
         return response.json()["choices"][0]["message"]["content"]
 
     def _complete_sync(self, messages, temperature=0.7, max_tokens=None):
+        """Синхронно отправляет сообщения в GigaChat и возвращает текст ответа."""
+
         token = self._ensure_token()
 
         headers = {

@@ -35,13 +35,18 @@ services:
   ai-generation:
     build: ./services/ai-generation
     environment:
-      <<: *db-env
       CATALOGS_DIR: /app/catalogs
-    depends_on:
-      bd:
-        condition: service_healthy
+      LEARNING_MATERIALS_DIR: /app/learning_materials
+      GIGACHAT_CLIENT_ID: ${GIGACHAT_CLIENT_ID}
+      GIGACHAT_CLIENT_SECRET: ${GIGACHAT_CLIENT_SECRET}
+      GIGACHAT_AUTH_URL: ${GIGACHAT_AUTH_URL}
+      GIGACHAT_CHAT_URL: ${GIGACHAT_CHAT_URL}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE}
+      GIGACHAT_VERIFY_SSL: ${GIGACHAT_VERIFY_SSL}
     volumes:
       - ./catalogs:/app/catalogs:ro
+      - ./catalogs/learning_materials:/app/learning_materials:ro
     ports:
       - "8004:8000"
     networks:

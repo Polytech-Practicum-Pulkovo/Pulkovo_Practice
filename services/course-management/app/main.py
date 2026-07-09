@@ -3,11 +3,12 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+import psycopg2
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.clients import generate_questions, generate_topic_distribution
+from app.clients import generate_questions, parse_program_file
 from app.db import get_cursor
 
 LEARNING_MATERIALS_DIR = os.getenv("LEARNING_MATERIALS_DIR", "/app/learning_materials")
@@ -25,11 +26,6 @@ app.add_middleware(
 class ManualTopicRequest(BaseModel):
     id_program: int
     name: str
-
-
-class AiTopicRequest(BaseModel):
-    id_program: int
-    candidate_topics: list[str]
 
 
 class AssignmentRequest(BaseModel):
@@ -144,15 +140,18 @@ def get_program(program_id: int):
 
 @app.post("/programs")
 def create_program(payload: ProgramCreateRequest):
-    with get_cursor(commit=True) as cur:
-        cur.execute(
-            """
-            INSERT INTO program (id_type, program_code, name, time_to_complete, is_shown)
-            VALUES (%s, %s, %s, %s, true) RETURNING id_program
-            """,
-            (payload.id_type, payload.program_code, payload.name, payload.time_to_complete),
-        )
-        result = cur.fetchone()
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                """
+                INSERT INTO program (id_type, program_code, name, time_to_complete, is_shown)
+                VALUES (%s, %s, %s, %s, true) RETURNING id_program
+                """,
+                (payload.id_type, payload.program_code, payload.name, payload.time_to_complete),
+            )
+            result = cur.fetchone()
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=409, detail="Программа с таким номером уже существует")
 
     return {"id_program": result["id_program"]}
 
@@ -420,28 +419,17 @@ def add_topic_manual(payload: ManualTopicRequest):
     return {"id_topic": result["id_topic"], "name": payload.name}
 
 
-@app.post("/topics/ai-distribution")
-async def add_topics_ai(payload: AiTopicRequest):
-    with get_cursor() as cur:
-        cur.execute(
-            "SELECT name FROM program WHERE id_program = %s", (payload.id_program,)
-        )
-        program = cur.fetchone()
-        if not program:
-            raise HTTPException(status_code=404, detail="Программа не найдена")
+@app.post("/programs/parse-file")
+async def parse_program(file: UploadFile = File(...)):
+    """Прогоняет загруженный DOCX программы через ai-generation и возвращает
+    темы/литературу/часы для автозаполнения формы — ничего не пишет в БД."""
+    content = await file.read()
+    try:
+        structure = await parse_program_file(file.filename, content)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось разобрать файл: {exc}")
 
-    distribution = await generate_topic_distribution(program["name"], payload.candidate_topics)
-
-    created = []
-    with get_cursor(commit=True) as cur:
-        for item in distribution:
-            cur.execute(
-                "INSERT INTO topic (id_program, name) VALUES (%s, %s) RETURNING id_topic",
-                (payload.id_program, item["topic"]),
-            )
-            created.append({"id_topic": cur.fetchone()["id_topic"], **item})
-
-    return {"topics": created}
+    return structure
 
 
 @app.post("/assignments")
@@ -475,15 +463,52 @@ def unassign_course(completion_id: int):
     return {"status": "deleted"}
 
 
+def _previous_questions_for_topic(cur, topic_id: int) -> list[dict]:
+    """Собирает уже существующие вопросы темы в формате для дедупликации в ai-generation."""
+
+    cur.execute("SELECT id_question, question_text FROM question WHERE id_topic = %s", (topic_id,))
+    existing = cur.fetchall()
+
+    previous = []
+    for q in existing:
+        cur.execute(
+            "SELECT answer_text, is_correct FROM answer WHERE id_question = %s",
+            (q["id_question"],),
+        )
+        answers = cur.fetchall()
+        previous.append(
+            {
+                "question_text": q["question_text"],
+                "correct_answers": [a["answer_text"] for a in answers if a["is_correct"]],
+                "incorrect_answers": [a["answer_text"] for a in answers if not a["is_correct"]],
+            }
+        )
+    return previous
+
+
 @app.post("/questions/generate")
 async def generate_topic_questions(payload: QuestionGenerationRequest):
     with get_cursor() as cur:
-        cur.execute("SELECT name FROM topic WHERE id_topic = %s", (payload.id_topic,))
-        topic = cur.fetchone()
-        if not topic:
+        cur.execute("SELECT id_topic FROM topic WHERE id_topic = %s", (payload.id_topic,))
+        if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Тема не найдена")
 
-    generated = await generate_questions(topic["name"], payload.count)
+        cur.execute(
+            "SELECT file_link FROM learning_material WHERE id_topic = %s "
+            "ORDER BY id_learning_material LIMIT 1",
+            (payload.id_topic,),
+        )
+        material = cur.fetchone()
+        if not material:
+            raise HTTPException(status_code=400, detail="У темы нет загруженного материала для генерации вопросов")
+
+        previous_questions = _previous_questions_for_topic(cur, payload.id_topic)
+
+    material_path = os.path.join(LEARNING_MATERIALS_DIR, material["file_link"])
+    try:
+        generated = await generate_questions(material_path, previous_questions, payload.count)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось сгенерировать вопросы: {exc}")
 
     created_questions = []
     with get_cursor(commit=True) as cur:
@@ -495,14 +520,25 @@ async def generate_topic_questions(payload: QuestionGenerationRequest):
             )
             question_id = cur.fetchone()["id_question"]
 
-            for answer in item["answers"]:
+            answers = []
+            for idx, option_text in enumerate(item["options"]):
+                is_correct = idx == item["correct_option"]
                 cur.execute(
                     "INSERT INTO answer (id_question, answer_text, is_correct) "
-                    "VALUES (%s, %s, %s)",
-                    (question_id, answer["answer_text"], answer["is_correct"]),
+                    "VALUES (%s, %s, %s) RETURNING id_answer",
+                    (question_id, option_text, is_correct),
+                )
+                answers.append(
+                    {
+                        "id_answer": cur.fetchone()["id_answer"],
+                        "answer_text": option_text,
+                        "is_correct": is_correct,
+                    }
                 )
 
-            created_questions.append({"id_question": question_id, **item})
+            created_questions.append(
+                {"id_question": question_id, "question_text": item["question_text"], "answers": answers}
+            )
 
     return {"questions": created_questions}
 

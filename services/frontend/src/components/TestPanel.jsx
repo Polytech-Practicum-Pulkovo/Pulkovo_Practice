@@ -1,17 +1,65 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Modal from "./Modal";
 
-export default function TestPanel({ questions, lastAttempt, onSubmit, onAskExplanation, onComplain }) {
-  const [retaking, setRetaking] = useState(false);
+const TEST_DURATION_MINUTES = 45;
+
+function formatTime(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export default function TestPanel({ questions, lastAttempt, session, onStart, onSubmit, onAskExplanation, onComplain }) {
   const [selected, setSelected] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState(null);
+  const [starting, setStarting] = useState(false);
+  const [remaining, setRemaining] = useState(session?.seconds_remaining ?? 0);
+  const [timedOut, setTimedOut] = useState(false);
   const [explanations, setExplanations] = useState({});
   const [complaintFor, setComplaintFor] = useState(null);
   const [complaintText, setComplaintText] = useState("");
   const [complaintSent, setComplaintSent] = useState(false);
+  const selectedRef = useRef(selected);
 
-  const showingResults = lastAttempt && !retaking;
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    if (!session) return undefined;
+
+    const deadline = new Date(session.started_at).getTime() + session.duration_seconds * 1000;
+    let expired = false;
+
+    async function submitOnTimeout() {
+      const answers = questions
+        .filter((q) => selectedRef.current[q.id_question])
+        .map((q) => ({ id_question: q.id_question, id_answer: selectedRef.current[q.id_question] }));
+      setTimedOut(true);
+      setSubmitting(true);
+      try {
+        await onSubmit(answers);
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    function tick() {
+      const secs = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      setRemaining(secs);
+      if (secs <= 0 && !expired) {
+        expired = true;
+        clearInterval(interval);
+        submitOnTimeout();
+      }
+    }
+
+    const interval = setInterval(tick, 1000);
+    tick();
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   function selectAnswer(questionId, answerId) {
     setSelected((prev) => ({ ...prev, [questionId]: answerId }));
@@ -29,11 +77,20 @@ export default function TestPanel({ questions, lastAttempt, onSubmit, onAskExpla
 
     setSubmitting(true);
     try {
-      const outcome = await onSubmit(answers);
-      setResult(outcome);
-      setRetaking(false);
+      await onSubmit(answers);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleStart() {
+    setStarting(true);
+    try {
+      setSelected({});
+      setTimedOut(false);
+      await onStart();
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -54,13 +111,48 @@ export default function TestPanel({ questions, lastAttempt, onSubmit, onAskExpla
     setComplaintSent(true);
   }
 
-  if (showingResults || result) {
-    const answersById = new Map((lastAttempt?.answers || []).map((a) => [a.id_question, a]));
-    const percent = result?.percent ?? lastAttempt?.percent ?? 0;
-    const passed = result?.passed ?? lastAttempt?.passed ?? false;
+  // Тест уже начат — показываем вопросы и таймер.
+  if (session) {
+    return (
+      <div>
+        <div className="alert alert-info mb-16">⏱ Осталось времени: {formatTime(remaining)}</div>
+        {questions.map((q) => (
+          <div key={q.id_question} className="question-block">
+            <strong>Вопрос {q.id_question}:</strong>
+            <p>{q.question_text}</p>
+            {q.answers.map((a) => (
+              <label key={a.id_answer} className="answer-option">
+                <input
+                  type="radio"
+                  name={`question-${q.id_question}`}
+                  checked={selected[q.id_question] === a.id_answer}
+                  onChange={() => selectAnswer(q.id_question, a.id_answer)}
+                />
+                {a.answer_text}
+              </label>
+            ))}
+          </div>
+        ))}
+        <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? "Проверяем…" : "Завершить тест"}
+        </button>
+      </div>
+    );
+  }
+
+  // Тест уже проходили — показываем результаты последней попытки.
+  if (lastAttempt) {
+    const answersById = new Map((lastAttempt.answers || []).map((a) => [a.id_question, a]));
+    const { percent, passed } = lastAttempt;
 
     return (
       <div>
+        {timedOut && (
+          <div className="alert alert-error mb-16">
+            ⏱ Время на прохождение теста истекло — тест завершён автоматически, неотвеченные вопросы
+            засчитаны как неверные.
+          </div>
+        )}
         <p>
           Результат последнего прохождения: <strong>{percent}%</strong> ({passed ? "зачтено" : "не зачтено"})
         </p>
@@ -105,18 +197,10 @@ export default function TestPanel({ questions, lastAttempt, onSubmit, onAskExpla
             </div>
           );
         })}
-        {!passed && (
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setResult(null);
-              setSelected({});
-              setRetaking(true);
-            }}
-          >
-            Пройти тест заново
-          </button>
-        )}
+
+        <button className="btn btn-primary" onClick={handleStart} disabled={starting}>
+          {starting ? "Запускаем…" : "Начать заново"}
+        </button>
 
         {complaintFor && (
           <Modal
@@ -149,28 +233,20 @@ export default function TestPanel({ questions, lastAttempt, onSubmit, onAskExpla
     );
   }
 
+  // Тест ещё не проходили — показываем информацию перед началом.
   return (
     <div>
-      {questions.map((q) => (
-        <div key={q.id_question} className="question-block">
-          <strong>Вопрос {q.id_question}:</strong>
-          <p>{q.question_text}</p>
-          {q.answers.map((a) => (
-            <label key={a.id_answer} className="answer-option">
-              <input
-                type="radio"
-                name={`question-${q.id_question}`}
-                checked={selected[q.id_question] === a.id_answer}
-                onChange={() => selectAnswer(q.id_question, a.id_answer)}
-              />
-              {a.answer_text}
-            </label>
-          ))}
-        </div>
-      ))}
-      <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
-        {submitting ? "Проверяем…" : "Завершить тест"}
+      <h3>Перед началом теста</h3>
+      <p>Количество вопросов: {questions.length}</p>
+      <p>Время на прохождение: {TEST_DURATION_MINUTES} мин.</p>
+      <p>
+        После начала теста материалы и чат с ИИ будут недоступны во всех курсах до завершения теста. Если
+        время истечёт, тест завершится автоматически, а неотвеченные вопросы будут засчитаны как неверные.
+      </p>
+      <button className="btn btn-primary" onClick={handleStart} disabled={starting || questions.length === 0}>
+        {starting ? "Запускаем…" : "Начать"}
       </button>
+      {questions.length === 0 && <p className="alert alert-error mt-16">Вопросы по теме ещё не готовы.</p>}
     </div>
   );
 }

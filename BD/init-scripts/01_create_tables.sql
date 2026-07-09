@@ -37,9 +37,9 @@ CREATE TABLE IF NOT EXISTS program(
 );
 
 CREATE TABLE IF NOT EXISTS topic(
-    id_topic   int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    id_program int          NOT NULL,
-    name       varchar(128) NOT NULL,
+    id_topic   int  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_program int  NOT NULL,
+    name       text NOT NULL,
 
     CONSTRAINT topic_program_fk
         FOREIGN KEY (id_program)
@@ -209,10 +209,11 @@ CREATE TABLE IF NOT EXISTS material_study(
 );
 
 CREATE TABLE IF NOT EXISTS test_completion(
-    id_test_completion    int  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    id_program_completion int  NOT NULL,
-    id_answer             int  NOT NULL,
-    is_final_test         bool NOT NULL,
+    id_test_completion    int       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_program_completion int       NOT NULL,
+    id_answer             int       NOT NULL,
+    is_final_test         bool      NOT NULL,
+    submitted_at           timestamp NOT NULL,
 
     CONSTRAINT test_completion_program_completion_fk
         FOREIGN KEY (id_program_completion)
@@ -227,10 +228,37 @@ CREATE TABLE IF NOT EXISTS test_completion(
         ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS test_session(
+    id_employee           int       NOT NULL PRIMARY KEY,
+    id_program_completion int       NOT NULL,
+    id_topic               int,
+    is_final_test          bool      NOT NULL,
+    started_at             timestamp NOT NULL,
+    duration_seconds       int       NOT NULL,
+
+    CONSTRAINT test_session_employee_fk
+        FOREIGN KEY (id_employee)
+        REFERENCES employee(id_employee)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT test_session_program_completion_fk
+        FOREIGN KEY (id_program_completion)
+        REFERENCES program_completion(id_program_completion)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT test_session_topic_fk
+        FOREIGN KEY (id_topic)
+        REFERENCES topic(id_topic)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS literature (
-    id_literature int          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name          varchar(128) NOT NULL,
-    material_link text         NOT NULL
+    id_literature int  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name          text NOT NULL,
+    material_link text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS program_literature (

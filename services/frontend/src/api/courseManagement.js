@@ -55,8 +55,10 @@ export function addTopicManual(idProgram, name) {
   return post(base, "/topics/manual", { id_program: idProgram, name });
 }
 
-export function addTopicsAi(idProgram, candidateTopics) {
-  return post(base, "/topics/ai-distribution", { id_program: idProgram, candidate_topics: candidateTopics });
+export function parseProgramFile(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return postForm(base, "/programs/parse-file", formData);
 }
 
 export function deleteTopic(topicId) {
